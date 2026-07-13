@@ -37,8 +37,8 @@ class Movie(Base):
 class Interaction(Base):
     __tablename__ = "interactions"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(String, ForeignKey("users.id"))
-    movie_id = Column(String, ForeignKey("movies.id"))
+    user_id = Column(String, ForeignKey("users.id"), index=True)
+    movie_id = Column(String, ForeignKey("movies.id"), index=True)
     interaction_type = Column(String) # 'view', 'like', 'dislike', 'watchlist'
     rating = Column(Float, nullable=True) # Explicit rating if any
     timestamp = Column(DateTime, default=datetime.utcnow)

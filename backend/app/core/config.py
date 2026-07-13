@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     backend_host: str = "0.0.0.0"
     backend_port: int = 8001
 
+    # Database
+    database_url: str = ""
+
     # Upstash Redis
     upstash_redis_url: str = ""
     upstash_redis_token: str = ""

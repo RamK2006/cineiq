@@ -72,6 +72,16 @@ async def health_check():
     except Exception as e:
         checks["redis"] = f"error: {str(e)[:100]}"
         
+    # Check Postgres
+    try:
+        from app.db.session import engine
+        from sqlalchemy import text
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        checks["postgres"] = "ok"
+    except Exception as e:
+        checks["postgres"] = f"error: {str(e)[:100]}"
+        
     # Check Gemini API
     checks["gemini_api"] = "configured" if settings.gemini_api_key else "not_configured"
     
