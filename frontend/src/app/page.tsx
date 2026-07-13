@@ -25,9 +25,9 @@ const trendingMovies = [
 
 export default function HomePage() {
   const [typedText, setTypedText] = useState('');
-  const fullText = "Discover films that match your soul.";
 
   useEffect(() => {
+    const fullText = "Discover films that match your soul.";
     let i = 0;
     const interval = setInterval(() => {
       if (i <= fullText.length) {
