@@ -64,7 +64,7 @@ export default function Navigation() {
 
       <nav aria-label="Main navigation" style={{ display: 'flex', gap: '8px' }}>
         {navItems.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           const Icon = item.icon;
           return (
             <Link
