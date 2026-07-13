@@ -82,11 +82,19 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 
         if rsa_key:
             public_key = jwt.algorithms.RSAAlgorithm.from_jwk(rsa_key)
+            
+            options = {}
+            if settings.clerk_audience:
+                options["verify_aud"] = True
+            else:
+                options["verify_aud"] = False
+
             payload = jwt.decode(
                 token,
                 public_key,
                 algorithms=["RS256"],
-                options={"verify_aud": False}
+                audience=settings.clerk_audience if settings.clerk_audience else None,
+                options=options
             )
             return payload
             
