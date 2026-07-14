@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import { Play, Plus, ThumbsUp, Heart, CornerDownRight } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -34,6 +35,32 @@ const emotionalArc = [
 
 export default function MovieDetailPage() {
   const { scrollY } = useScroll();
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = async () => {
+    const shareUrl = window.location.href;
+    const shareData = {
+      title: movie.title,
+      text: `Check out ${movie.title} on CineIQ!`,
+      url: shareUrl,
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch {
+        // User cancelled or share failed — do nothing
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // Clipboard API not available
+      }
+    }
+  };
   
   // Parallax effects
   const y1 = useTransform(scrollY, [0, 500], [0, 200]);
@@ -83,6 +110,23 @@ export default function MovieDetailPage() {
             </button>
             <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }} aria-label="Add to favorites">
               <Heart size={20} />
+            </button>
+            <button
+              className="btn btn-glass"
+              style={{ padding: '12px', borderRadius: '50%', position: 'relative' }}
+              onClick={handleShare}
+              title={copied ? 'Link copied!' : 'Share'}
+            >
+              <Share2 size={20} />
+              {copied && (
+                <span style={{
+                  position: 'absolute', top: '-28px', left: '50%', transform: 'translateX(-50%)',
+                  background: '#22C55E', color: 'white', padding: '2px 8px', borderRadius: '4px',
+                  fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap',
+                }}>
+                  Copied!
+                </span>
+              )}
             </button>
           </div>
         </motion.div>
