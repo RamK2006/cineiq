@@ -1,5 +1,8 @@
 # CINEIQ 🎬
 
+## Project Status
+This project is currently **Active** and under development. We are open to new contributions!
+
 **Next-Generation AI-Powered Movie Recommendation Platform**
 
 
@@ -65,6 +68,22 @@ cd frontend
 npm install
 npm run dev
 ```
+## Roadmap
+- [ ] Implement users authentication (OAuth)
+- [ ] Add mobile responsiveness
+- [ ] Integrate real-time analytics dashboard
+- [ ] Expand AI recommendation models
+
+## Contributing
+We Welcome Contributions !
+1. Please check the issues list.
+2. Fork the repository.
+3. Create a new branch: `git checkout -b feature/your-feature-name`
+4. Make your changes and commit: `git commit -m 'Add some feature'`
+5. Push to your branch: ` git push origin feature/your-feature-name`
+6. Open a Pull Request.
+
+
 
 ## Technology Stack
 
@@ -75,3 +94,8 @@ npm run dev
 - **Vector Search:** Qdrant
 - **Object Storage:** MinIO
 - **Containerization:** Docker & Docker Compose
+
+![ECSOC26](https://img.shields.io/badge/Event-ECSOC26-blue)
+
+## License
+This project is licensed under the MIT License 
