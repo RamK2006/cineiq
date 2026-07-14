@@ -1,8 +1,9 @@
 'use client';
 
 import { motion, useScroll, useTransform } from 'framer-motion';
-import { Play, Plus, ThumbsUp, Heart, CornerDownRight } from 'lucide-react';
+import { Play, Plus, ThumbsUp, Heart, Share2, CornerDownRight } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { useParams } from 'next/navigation' ;
 
 // Mock Data
 const movie = {
@@ -33,6 +34,23 @@ const emotionalArc = [
 ];
 
 export default function MovieDetailPage() {
+   const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: movie.title,
+          url: window.location.href,
+        });
+      } catch (error) {
+        console.error('Error sharing:',error);
+      }
+    } else {
+      navigator.clipboard.writeText(window.location.href);
+      alert('Link copied to clipboard!');
+    }
+  };
+
+  const params = useParams();
   const { scrollY } = useScroll();
   
   // Parallax effects
@@ -84,6 +102,15 @@ export default function MovieDetailPage() {
             <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }} aria-label="Add to favorites">
               <Heart size={20} />
             </button>
+            <button
+              className="btn btn-glass"
+              style={{ padding: '12px', borderRadius: '50%' }}
+              aria-label="Share movie"
+              onClick={handleShare}
+            >
+              <Share2 size={20} /> 
+            </button> 
+  
           </div>
         </motion.div>
       </div>
