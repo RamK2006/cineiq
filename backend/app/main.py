@@ -1,13 +1,24 @@
 from contextlib import asynccontextmanager
+import traceback
+import time
+import uuid
+
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import time
 import structlog
+import structlog.contextvars
 
 from app.core.config import settings
 
 logger = structlog.get_logger()
+
+
+def get_request_id(request: Request) -> str:
+    """Return the request's correlation ID, generating one only as a fallback."""
+    return getattr(request.state, "request_id", str(uuid.uuid4()))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,24 +45,90 @@ app.add_middleware(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    # Generate a unique correlation ID for every incoming request.
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+
     start = time.time()
     response = await call_next(request)
     latency = int((time.time() - start) * 1000)
-    
+
     logger.info(
         "http_request",
         method=request.method,
         path=request.url.path,
         status_code=response.status_code,
-        latency_ms=latency
+        latency_ms=latency,
+        request_id=request_id,
     )
-    
+
+    # Expose the correlation ID to clients for support/debugging.
+    response.headers["X-Request-ID"] = request_id
+    structlog.contextvars.clear_contextvars()
     return response
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    request_id = get_request_id(request)
+    logger.warning(
+        "request_validation_error",
+        path=request.url.path,
+        errors=exc.errors(),
+        request_id=request_id,
+    )
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "error_code": "VALIDATION_ERROR",
+            "request_id": request_id,
+        },
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    request_id = get_request_id(request)
+    logger.warning(
+        "http_exception",
+        path=request.url.path,
+        status_code=exc.status_code,
+        detail=exc.detail,
+        request_id=request_id,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "error_code": "HTTP_ERROR",
+            "request_id": request_id,
+        },
+    )
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error("unhandled_exception", error=str(exc), path=request.url.path)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    request_id = get_request_id(request)
+    logger.error(
+        "unhandled_exception",
+        path=request.url.path,
+        error=str(exc),
+        traceback=traceback.format_exc(),
+        request_id=request_id,
+    )
+    if settings.environment.lower() in ("production", "prod"):
+        detail = "Internal server error"
+    else:
+        detail = f"{type(exc).__name__}: {exc}"
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": detail,
+            "error_code": "INTERNAL_SERVER_ERROR",
+            "request_id": request_id,
+        },
+    )
 
 from app.api.v1 import api_router
 app.include_router(api_router, prefix="/api/v1")
