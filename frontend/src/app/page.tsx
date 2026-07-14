@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import { Play, Info } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-
 const BLUR_PLACEHOLDER = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyIDMiPjxyZWN0IHdpZHRoPSIyIiBoZWlnaHQ9IjMiIGZpbGw9IiMxYTFhMmUiLz48L3N2Zz4=";
 
 // Mock data

@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import { Search, Mic, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-
 const BLUR_PLACEHOLDER = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyIDMiPjxyZWN0IHdpZHRoPSIyIiBoZWlnaHQ9IjMiIGZpbGw9IiMxYTFhMmUiLz48L3N2Zz4=";
 
 export default function SemanticSearchPage() {
@@ -62,11 +61,13 @@ export default function SemanticSearchPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder='e.g., "A dark sci-fi movie about aliens and time travel"'
+              aria-label="Search for movies by description"
               style={{ flex: 1, background: 'transparent', border: 'none', color: 'white', fontSize: '18px', outline: 'none' }}
             />
             <button 
               type="button"
               onClick={() => setIsListening(!isListening)}
+              aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
               style={{ background: isListening ? 'rgba(229, 9, 20, 0.1)' : 'transparent', border: 'none', padding: '12px', borderRadius: '50%', cursor: 'pointer', color: isListening ? 'var(--accent-primary)' : 'var(--text-muted)', transition: 'all 0.2s' }}
             >
               <Mic size={24} style={isListening ? { animation: 'pulse 1.5s infinite' } : {}} />

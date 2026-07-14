@@ -16,7 +16,10 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <Navigation />
-        {children}
+        <a href="#main-content" className="skip-link">Skip to main content</a>
+        <div id="main-content">
+          {children}
+        </div>
       </body>
     </html>
   );

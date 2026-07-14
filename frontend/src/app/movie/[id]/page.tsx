@@ -74,16 +74,16 @@ export default function MovieDetailPage() {
           </div>
           
           <div style={{ display: 'flex', gap: '16px', marginTop: '8px' }}>
-            <button className="btn btn-primary">
+            <button className="btn btn-primary" aria-label="Play movie">
               <Play size={20} fill="currentColor" /> Play
             </button>
-            <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }}>
+            <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }} aria-label="Add to watchlist">
               <Plus size={20} />
             </button>
-            <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }}>
+            <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }} aria-label="Like this movie">
               <ThumbsUp size={20} />
             </button>
-            <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }}>
+            <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }} aria-label="Add to favorites">
               <Heart size={20} />
             </button>
           </div>

@@ -21,7 +21,7 @@ export default function ProfilePage() {
         {/* Left Col: User Card */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-panel" style={{ padding: '40px 24px', textAlign: 'center', position: 'relative' }}>
-            <button style={{ position: 'absolute', top: '20px', right: '20px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <button aria-label="Open profile settings" style={{ position: 'absolute', top: '20px', right: '20px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
               <Settings size={20} />
             </button>
             
