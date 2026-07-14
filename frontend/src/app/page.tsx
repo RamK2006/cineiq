@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Play, Info } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 // Mock data
 const heroMovie = {
@@ -115,7 +116,7 @@ export default function HomePage() {
             >
               <Link href={`/movie/${movie.id}`}>
                 <div className="movie-card">
-                  <img src={movie.poster} alt={movie.title} className="movie-poster" />
+                  <Image src={movie.poster} alt={movie.title} className="movie-poster" width={220} height={330} />
                   <div className="movie-overlay">
                     <div className="movie-title">{movie.title}</div>
                     <div className="movie-meta">
