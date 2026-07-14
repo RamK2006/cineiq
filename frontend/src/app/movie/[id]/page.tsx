@@ -34,6 +34,22 @@ const emotionalArc = [
 ];
 
 export default function MovieDetailPage() {
+  const handleShare = async () => {
+    if (navigator.share) {
+      try{
+        await navigator.share({
+          title: movie.title,
+          url: window.location.href,
+        });
+      } catch (err) {
+        console.error('Error sharing:', err);
+      }
+    } else {
+      navigator.clipboard.writeText(window.location.href);
+      alert('Link copied to clipboard!');
+    }
+  };
+
   const params = useParams();
   const { scrollY } = useScroll();
   
@@ -86,6 +102,13 @@ export default function MovieDetailPage() {
             <button className="btn btn-glass" style={{ padding: '12px', borderRadius: '50%' }}>
               <Heart size={20} />
             </button>
+            <Button 
+              onClick={handleShare}
+              className="btn btn-glass"
+              style={{ padding: '12px', borderRadius: '50%' }}
+            >
+              <Share2 size={20} />
+            </Button>  
           </div>
         </motion.div>
       </div>
