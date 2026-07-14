@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from typing import List, Optional
 from pydantic import BaseModel
 import structlog

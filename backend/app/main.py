@@ -1,12 +1,13 @@
 from contextlib import asynccontextmanager
+import time
+
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import time
-import structlog
 
+from app.api.v1 import api_router
 from app.core.config import settings
-
 logger = structlog.get_logger()
 
 @asynccontextmanager
@@ -53,7 +54,6 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error("unhandled_exception", error=str(exc), path=request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
-from app.api.v1 import api_router
 app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/health")

@@ -1,5 +1,6 @@
 # CINEIQ 🎬
 
+![CI](https://github.com/RamK2006/cineiq/actions/workflows/ci.yml/badge.svg)
 **Next-Generation AI-Powered Movie Recommendation Platform**
 
 

@@ -72,7 +72,7 @@ export default function Error({
           marginBottom: '32px',
           lineHeight: 1.6,
         }}>
-          An unexpected error occurred during the projection. We couldn't retrieve the reel for this page.
+          An unexpected error occurred during the projection. We couldn&apos;t retrieve the reel for this page.
         </p>
 
         {error.message && (

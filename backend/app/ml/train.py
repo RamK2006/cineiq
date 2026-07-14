@@ -6,9 +6,7 @@ Generates and uploads Sentence-Transformers embeddings to Qdrant.
 """
 
 import os
-import sys
 import logging
-import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cineiq.train")

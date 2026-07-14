@@ -16,3 +16,4 @@ python-multipart==0.0.9
 structlog==24.1.0
 PyJWT==2.8.0
 cryptography==42.0.2
+ruff==0.12.5
