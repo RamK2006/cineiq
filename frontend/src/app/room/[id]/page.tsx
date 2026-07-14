@@ -15,6 +15,7 @@ export default function WatchRoomPage() {
     { user: 'System', text: 'Welcome to the Watch Party!' }
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [sidebarVisible, setSidebarVisible] = useState(true);
 
   // Mock participants
   const participants = ['You', 'Alex', 'Sarah'];
@@ -24,6 +25,18 @@ export default function WatchRoomPage() {
     console.log(`Connecting to WS room: ${roomId}`);
     return () => console.log('Disconnecting WS');
   }, [roomId]);
+
+  // Keyboard shortcut to toggle sidebar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'w') {
+        e.preventDefault();
+        setSidebarVisible(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handlePlayPause = () => {
     setIsPlaying(!isPlaying);
@@ -59,7 +72,7 @@ export default function WatchRoomPage() {
         )}
 
         {/* Video Controls Bottom Bar */}
-        <div className="glass-panel" style={{ position: 'absolute', bottom: '20px', left: '20px', right: '320px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div className="glass-panel" style={{ position: 'absolute', bottom: '20px', left: '20px', right: sidebarVisible ? '320px' : '20px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
           <button onClick={handlePlayPause} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
             {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
           </button>
@@ -76,7 +89,7 @@ export default function WatchRoomPage() {
       </div>
 
       {/* Right Sidebar: Chat & Participants */}
-      <div className="glass-panel" style={{ position: 'absolute', top: '80px', right: '20px', bottom: '20px', width: '280px', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.1)' }}>
+      {sidebarVisible && <div className="glass-panel" style={{ position: 'absolute', top: '80px', right: '20px', bottom: '20px', width: '280px', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.1)' }}>
         
         {/* Participants */}
         <div style={{ padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
@@ -118,6 +131,36 @@ export default function WatchRoomPage() {
         </form>
 
       </div>
+      {/* Sidebar Toggle Button */}
+      {!sidebarVisible && (
+        <button
+          onClick={() => setSidebarVisible(true)}
+          style={{
+            position: 'absolute',
+            top: '90px',
+            right: '20px',
+            background: 'rgba(255,255,255,0.1)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '8px',
+            padding: '8px 12px',
+            color: 'white',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '12px',
+            fontFamily: 'var(--font-body)',
+            transition: 'background 0.2s',
+            zIndex: 10,
+          }}
+          title="Show sidebar (Ctrl+Shift+W)"
+          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+        >
+          <MessageSquare size={14} />
+          Chat
+        </button>
+      )}
     </main>
   );
 }
