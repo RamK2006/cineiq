@@ -20,7 +20,7 @@ export default function Navigation() {
   const navItems = [
     { href: '/', label: 'Home', icon: Home },
     { href: '/search', label: 'Semantic Search', icon: Search },
-    { href: '/room/demo', label: 'Watch Party', icon: Users },
+    { href: '/room/demo', label: 'Watch Party', icon: Users, shortcut: 'Ctrl+Shift+W' },
     { href: '/profile', label: 'Profile', icon: User },
   ];
 
@@ -88,6 +88,9 @@ export default function Navigation() {
             >
               <Icon size={16} />
               {item.label}
+              {'shortcut' in item && (
+                <span style={{ fontSize: '10px', opacity: 0.5, marginLeft: '4px' }} title={item.shortcut}>{item.shortcut}</span>
+              )}
             </Link>
           );
         })}
