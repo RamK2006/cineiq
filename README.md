@@ -1,14 +1,38 @@
 # CINEIQ 🎬
 
-**Next-Generation AI-Powered Movie Recommendation Platform**
+**AI-Powered Movie Recommendation Platform**
 
+[![ECSoC 2026](https://img.shields.io/badge/ECSoC-2026-blue?style=flat-square)](https://github.com/RamK2006/cineiq)
+[![License](https://img.shields.io/github/license/RamK2006/cineiq?style=flat-square)](https://github.com/RamK2006/cineiq/blob/main/LICENSE)
+[![Good First Issues](https://img.shields.io/github/issues/RamK2006/cineiq/good%20first%20issue?style=flat-square&label=good%20first%20issues)](https://github.com/RamK2006/cineiq/issues?q=is%3Aopen+label%3A%22good+first+issue%22)
 
 ## Overview
 
-CINEIQ is a production-grade movie recommendation platform featuring advanced AI-driven personalized movie suggestions, real-time analytics, and a cinematic user interface.
+CINEIQ is a movie recommendation platform featuring AI-driven personalized suggestions, a cinematic user interface, and real-time analytics. Built with a modern full-stack architecture using FastAPI and Next.js 15.
 
-1. **FastAPI Backend** — Advanced ML inference, personalized recommendations, robust data processing pipelines
-2. **Next.js 15 Frontend** — Immersive, cinematic design system with Server-Side Rendering (SSR) for optimal performance
+## Current Status
+
+> 🚧 **Active Development** — CINEIQ is under active development as part of [ECSoC 2026](https://github.com/RamK2006/cineiq). Core features are functional, and many exciting capabilities are on the roadmap.
+
+### Implemented ✅
+- Next.js 15 frontend with cinematic UI
+- FastAPI backend with health endpoints
+- TMDB movie data integration
+- Movie detail pages with backdrop images
+- Navigation with active route highlighting
+- Responsive layout for desktop and mobile
+- Docker Compose stack for local development
+
+### Planned 🚧
+- Semantic search with Qdrant vector database
+- Collaborative filtering recommendation engine (SVD)
+- Real-time watch party with WebSocket sync
+- User authentication and profiles
+- Movie rating and review system
+- Watchlist, history, and interaction tracking
+- Voice search with Web Speech API
+- Emotional arc generation using Gemini
+- Dark/light theme toggle
 
 ## Architecture
 
@@ -31,6 +55,15 @@ CINEIQ is a production-grade movie recommendation platform featuring advanced AI
                           └────────┘
 ```
 
+## Roadmap
+
+| Phase | Focus | Status |
+|-------|-------|--------|
+| 1 | Core UI, TMDB integration, Docker setup | ✅ Complete |
+| 2 | Auth, profiles, theme toggle, share button | 🚧 In Progress |
+| 3 | Semantic search, recommendations, ratings | 📋 Planned |
+| 4 | Watch party, voice search, emotional arcs | 📋 Planned |
+
 ## Quick Start
 
 ### Prerequisites
@@ -39,13 +72,12 @@ CINEIQ is a production-grade movie recommendation platform featuring advanced AI
 - Python 3.11+ (for local backend dev)
 
 ### Run with Docker (Recommended)
-The entire stack can be launched via Docker Compose:
 
 ```bash
 cp .env.example .env
 # Fill in API keys in .env
 make dev
-# or alternatively
+# or
 docker-compose up --build
 ```
 
@@ -55,8 +87,7 @@ docker-compose up --build
 ```bash
 cd backend
 pip install -r requirements.txt
-# Set up necessary env variables
-uvicorn app.main:app --reload   # Start API server
+uvicorn app.main:app --reload
 ```
 
 **Frontend:**
@@ -68,10 +99,42 @@ npm run dev
 
 ## Technology Stack
 
-- **Backend:** FastAPI, SQLAlchemy (async), AI/ML Pipelines
-- **Frontend:** Next.js 15, React, Tailwind CSS / Vanilla CSS (Cinematic Design)
-- **Database:** PostgreSQL 16
-- **Caching & Brokers:** Redis 7
-- **Vector Search:** Qdrant
-- **Object Storage:** MinIO
-- **Containerization:** Docker & Docker Compose
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 15, React, Tailwind CSS |
+| Backend | FastAPI, SQLAlchemy (async) |
+| Database | PostgreSQL 16 |
+| Caching | Redis 7 |
+| Vector Search | Qdrant |
+| Object Storage | MinIO |
+| Containerization | Docker & Docker Compose |
+
+## Contributing
+
+We welcome contributions, especially during ECSoC 2026!
+
+### How to Contribute
+
+1. **Find an issue** — Look for issues labeled `good first issue` for beginner-friendly tasks
+2. **Claim it** — Comment on the issue to let others know you're working on it
+3. **Fork & branch** — Fork the repo and create a branch: `fix/issue-number-description` or `feat/issue-number-description`
+4. **Make changes** — Write clean, well-documented code
+5. **Test** — Ensure `npm run build` and `npm run lint` pass (frontend) or relevant tests pass (backend)
+6. **Submit a PR** — Reference the issue number in your PR description (e.g., "Fixes #38")
+
+### Branch Naming
+
+- Bug fixes: `fix/issue-number-short-description`
+- Features: `feat/issue-number-short-description`
+- Documentation: `docs/issue-number-short-description`
+
+### PR Checklist
+
+- [ ] PR references the issue it fixes
+- [ ] Code builds without errors
+- [ ] No unnecessary files committed
+- [ ] Clear description of changes
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
