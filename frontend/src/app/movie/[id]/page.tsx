@@ -1,48 +1,106 @@
 'use client';
 
+import { useEffect, useState, useCallback } from 'react';
+import { useParams } from 'next/navigation';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import { Play, Plus, ThumbsUp, Heart, CornerDownRight } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
-// Mock Data
-const movie = {
-  id: '1',
-  title: 'Dune: Part Two',
-  tagline: 'Long live the fighters.',
-  overview: 'Paul Atreides unites with Chani and the Fremen while on a warpath of revenge against the conspirators who destroyed his family.',
-  year: '2024',
-  runtime: '2h 46m',
-  rating: 'PG-13',
-  genres: ['Sci-Fi', 'Adventure'],
-  director: 'Denis Villeneuve',
-  cast: ['Timothée Chalamet', 'Zendaya', 'Rebecca Ferguson', 'Javier Bardem'],
-  backdrop: 'https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg',
-  dominant_emotion: 'Tense',
-  match: 98
-};
+interface Movie {
+  id: string;
+  title: string;
+  tagline: string;
+  overview: string;
+  year: string;
+  runtime: string;
+  rating: string;
+  genres: string[];
+  director: string;
+  cast: string[];
+  backdrop: string;
+  dominant_emotion: string;
+  match: number;
+}
 
-// Emotional arc data (mock)
-const emotionalArc = [
-  { time: '0m', tension: 30, awe: 40, action: 10 },
-  { time: '30m', tension: 45, awe: 60, action: 20 },
-  { time: '60m', tension: 80, awe: 50, action: 75 },
-  { time: '90m', tension: 60, awe: 85, action: 40 },
-  { time: '120m', tension: 95, awe: 70, action: 90 },
-  { time: '150m', tension: 100, awe: 95, action: 100 },
-  { time: '166m', tension: 40, awe: 100, action: 20 },
-];
+interface EmotionalArcPoint {
+  time: string;
+  tension: number;
+  awe: number;
+  action: number;
+}
 
-export default function MovieDetailPage() {
+function MovieDetailContent() {
+  const params = useParams();
+  const movieId = params?.id as string;
+
+  const [movie, setMovie] = useState<Movie | null>(null);
+  const [emotionalArc, setEmotionalArc] = useState<EmotionalArcPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchMovie = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/movies/${movieId}`);
+      if (!res.ok) {
+        throw new Error(
+          res.status === 404
+            ? 'This movie could not be found.'
+            : res.status === 429
+            ? 'Too many requests right now. Please try again shortly.'
+            : `Failed to load movie (status ${res.status}).`
+        );
+      }
+      const data = await res.json();
+      setMovie(data.movie);
+      setEmotionalArc(data.emotionalArc ?? []);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Something went wrong loading this movie.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [movieId]);
+
+  useEffect(() => {
+    fetchMovie();
+  }, [fetchMovie]);
+
   const { scrollY } = useScroll();
-  
-  // Parallax effects
   const y1 = useTransform(scrollY, [0, 500], [0, 200]);
   const opacity = useTransform(scrollY, [0, 300], [1, 0]);
   const scale = useTransform(scrollY, [0, 300], [1, 1.05]);
 
+  if (loading) {
+    return (
+      <main style={{ minHeight: '100vh', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: 'var(--text-secondary)', fontSize: '16px' }}>Loading movie…</div>
+      </main>
+    );
+  }
+
+  if (error || !movie) {
+    return (
+      <main style={{ minHeight: '100vh', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px' }}>
+        <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', maxWidth: '480px' }}>
+          <h2 style={{ fontSize: '24px', marginBottom: '12px' }}>Couldn&apos;t load this movie</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>
+            {error || 'Please try again.'}
+          </p>
+          <button className="btn btn-primary" onClick={fetchMovie}>
+            Retry
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main style={{ minHeight: '100vh', background: 'var(--bg-base)' }}>
-      
+
       {/* Hero Parallax */}
       <div style={{ height: '70vh', position: 'relative', overflow: 'hidden' }}>
         <motion.div style={{
@@ -57,7 +115,7 @@ export default function MovieDetailPage() {
           position: 'absolute', inset: 0,
           background: 'linear-gradient(to top, var(--bg-base) 0%, transparent 60%)'
         }} />
-        
+
         <motion.div className="glass-panel" style={{
           opacity,
           position: 'absolute', bottom: '40px', left: '5%', right: '5%',
@@ -70,7 +128,7 @@ export default function MovieDetailPage() {
             <span style={{ padding: '2px 8px', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '4px' }}>{movie.rating}</span>
             <span>{movie.runtime}</span>
           </div>
-          
+
           <div style={{ display: 'flex', gap: '16px', marginTop: '8px' }}>
             <button className="btn btn-primary" aria-label="Play movie">
               <Play size={20} fill="currentColor" /> Play
@@ -90,7 +148,7 @@ export default function MovieDetailPage() {
 
       {/* Content Grid */}
       <div style={{ padding: '40px 5%', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '40px' }}>
-        
+
         {/* Left Col: Overview & Emotional Arc */}
         <div>
           <h3 style={{ fontSize: '24px', marginBottom: '16px', fontStyle: 'italic', color: 'var(--text-secondary)' }}>
@@ -116,7 +174,7 @@ export default function MovieDetailPage() {
                 </defs>
                 <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip 
+                <Tooltip
                   contentStyle={{ background: 'rgba(20,20,35,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
                   itemStyle={{ fontSize: '13px' }}
                 />
@@ -157,8 +215,16 @@ export default function MovieDetailPage() {
             </div>
           </div>
         </div>
-        
+
       </div>
     </main>
+  );
+}
+
+export default function MovieDetailPage() {
+  return (
+    <ErrorBoundary>
+      <MovieDetailContent />
+    </ErrorBoundary>
   );
 }
