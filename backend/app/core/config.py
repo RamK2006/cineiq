@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     backend_cors_origins: str | List[str] = ["http://localhost:3000", "https://*.vercel.app"]
     backend_host: str = "0.0.0.0"
     backend_port: int = 8001
+    max_room_participants: int = 10
 
     # Upstash Redis
     upstash_redis_url: str = ""

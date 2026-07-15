@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from typing import List, Optional
 from pydantic import BaseModel
 import structlog
@@ -50,7 +50,7 @@ def _hash_user_id_to_ml_id(user_id: str) -> str:
     hashed = int(hashlib.md5(user_id.encode()).hexdigest(), 16)
     return str((hashed % 943) + 1)
 
-async def _fetch_tmdb_movies(endpoint: str, limit: int = 20) -> List[MovieItem]:
+async def _fetch_tmdb_movies(endpoint: str, limit: int = 20, page: int = 1) -> List[MovieItem]:
     if not settings.tmdb_api_key:
         return []
         
@@ -58,7 +58,7 @@ async def _fetch_tmdb_movies(endpoint: str, limit: int = 20) -> List[MovieItem]:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"https://api.themoviedb.org/3/{endpoint}",
-                params={"language": "en-US", "page": 1},
+                params={"language": "en-US", "page": page},
                 headers={
                     "Authorization": f"Bearer {settings.tmdb_api_key}",
                     "accept": "application/json"
@@ -116,10 +116,16 @@ async def _fetch_tmdb_movie_by_id(movie_id: str, match_score: float) -> Optional
 @router.get("/personalized", response_model=RecommendationResponse)
 async def get_personalized_recommendations(
     user_id: str = Depends(get_current_user),
-    limit: int = Query(20, le=100)
+    limit: int = Query(20, le=100),
+    page: int = Query(
+        default=1,
+        ge=1,
+        le=1000,
+        description="TMDB page number"
+    )
 ):
     """Get personalized recommendations using SVD with TMDB Popular fallback."""
-    logger.info("fetch_personalized_recs", user_id=user_id, limit=limit)
+    logger.info("fetch_personalized_recs", user_id=user_id, limit=limit, page=page)
     
     model = _get_svd_model()
     
@@ -162,7 +168,7 @@ async def get_personalized_recommendations(
 
     # Cold-start / Fallback to TMDB popular
     logger.info("using_cold_start_fallback")
-    movies = await _fetch_tmdb_movies("movie/popular", limit)
+    movies = await _fetch_tmdb_movies("movie/popular", limit, page)
     
     if not movies:
         # Return mock data if TMDB fails or key not set
@@ -187,9 +193,17 @@ async def get_personalized_recommendations(
     return RecommendationResponse(algorithm="hybrid_ncf_svd_mock", movies=movies)
 
 @router.get("/trending", response_model=RecommendationResponse)
-async def get_trending_movies(limit: int = Query(20, le=100)):
+async def get_trending_movies(
+    limit: int = Query(20, le=100),
+    page: int = Query(
+        default=1,
+        ge=1,
+        le=1000,
+        description="TMDB page number"
+    )
+):
     """Get globally trending movies."""
-    movies = await _fetch_tmdb_movies("trending/movie/day", limit)
+    movies = await _fetch_tmdb_movies("trending/movie/day", limit, page)
     
     if not movies:
         movies = [

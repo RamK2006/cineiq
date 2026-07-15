@@ -4,6 +4,12 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Mic, Sparkles } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
+import Skeleton from '../../components/Skeleton';
+import ErrorState from '../../components/ErrorState';
+import EmptyState from '../../components/EmptyState';
+
+const BLUR_PLACEHOLDER = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyIDMiPjxyZWN0IHdpZHRoPSIyIiBoZWlnaHQ9IjMiIGZpbGw9IiMxYTFhMmUiLz48L3N2Zz4=";
 
 export default function SemanticSearchPage() {
   const [query, setQuery] = useState('');
@@ -59,11 +65,13 @@ export default function SemanticSearchPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder='e.g., "A dark sci-fi movie about aliens and time travel"'
+              aria-label="Search for movies by description"
               style={{ flex: 1, background: 'transparent', border: 'none', color: 'white', fontSize: '18px', outline: 'none' }}
             />
             <button 
               type="button"
               onClick={() => setIsListening(!isListening)}
+              aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
               style={{ background: isListening ? 'rgba(229, 9, 20, 0.1)' : 'transparent', border: 'none', padding: '12px', borderRadius: '50%', cursor: 'pointer', color: isListening ? 'var(--accent-primary)' : 'var(--text-muted)', transition: 'all 0.2s' }}
             >
               <Mic size={24} style={isListening ? { animation: 'pulse 1.5s infinite' } : {}} />
@@ -76,11 +84,28 @@ export default function SemanticSearchPage() {
 
         {/* Results */}
         {isSearching ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}>
-            <div className="skeleton" style={{ width: '100%', height: '140px', borderRadius: '16px', marginBottom: '16px' }} />
-            <div className="skeleton" style={{ width: '100%', height: '140px', borderRadius: '16px', marginBottom: '16px' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '20px 0' }}>
+            <Skeleton height={140} borderRadius={16} />
+            <Skeleton height={140} borderRadius={16} />
           </div>
         ) : query && (
+          query.toLowerCase() === 'error' ? (
+            <ErrorState 
+              title="Search Failure" 
+              message="The recommendation engine timed out. Please check your connection and try again." 
+              onRetry={() => {
+                setIsSearching(true);
+                setTimeout(() => setIsSearching(false), 1200);
+              }} 
+            />
+          ) : (query.toLowerCase() !== 'sci-fi' && query.toLowerCase() !== 'space aliens' && results.filter(m => m.title.toLowerCase().includes(query.toLowerCase()) || m.desc.toLowerCase().includes(query.toLowerCase())).length === 0) ? (
+            <EmptyState 
+              title="No Movie Recommendations" 
+              description={`We couldn't find any films matching "${query}". Try searching for categories like "sci-fi" or "time travel".`}
+              actionLabel="Clear Search"
+              onAction={() => setQuery('')}
+            />
+          ) : (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -90,33 +115,44 @@ export default function SemanticSearchPage() {
               Top Semantic Matches
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {results.map((movie, i) => (
-                <motion.div
-                  key={movie.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                >
-                  <Link href={`/movie/${movie.id}`}>
-                    <div className="glass-panel" style={{ display: 'flex', padding: '16px', gap: '20px', cursor: 'pointer', transition: 'transform 0.2s' }} onMouseOver={e => e.currentTarget.style.transform = 'scale(1.02)'} onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}>
-                      <img src={movie.poster} alt={movie.title} style={{ width: '80px', height: '120px', borderRadius: '8px', objectFit: 'cover' }} />
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <div>
-                            <h4 style={{ fontSize: '20px', marginBottom: '4px' }}>{movie.title} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({movie.year})</span></h4>
-                            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: 1.5, maxWidth: '90%' }}>{movie.desc}</p>
-                          </div>
-                          <div style={{ background: 'rgba(34, 197, 94, 0.1)', color: '#22C55E', padding: '4px 12px', borderRadius: '999px', fontSize: '13px', fontWeight: 600 }}>
-                            {movie.match}% Match
+              {results
+                .filter(m => query.toLowerCase() === 'sci-fi' || query.toLowerCase() === 'space aliens' || m.title.toLowerCase().includes(query.toLowerCase()) || m.desc.toLowerCase().includes(query.toLowerCase()))
+                .map((movie, i) => (
+                  <motion.div
+                    key={movie.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.1 }}
+                  >
+                    <Link href={`/movie/${movie.id}`}>
+                      <div className="glass-panel" style={{ display: 'flex', padding: '16px', gap: '20px', cursor: 'pointer', transition: 'transform 0.2s' }} onMouseOver={e => e.currentTarget.style.transform = 'scale(1.02)'} onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}>
+                        <Image 
+                          src={movie.poster} 
+                          alt={movie.title} 
+                          width={80}
+                          height={120}
+                          placeholder="blur"
+                          blurDataURL={BLUR_PLACEHOLDER}
+                          style={{ borderRadius: '8px', objectFit: 'cover' }} 
+                        />
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <h4 style={{ fontSize: '20px', marginBottom: '4px' }}>{movie.title} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({movie.year})</span></h4>
+                              <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: 1.5, maxWidth: '90%' }}>{movie.desc}</p>
+                            </div>
+                            <div style={{ background: 'rgba(34, 197, 94, 0.1)', color: '#22C55E', padding: '4px 12px', borderRadius: '999px', fontSize: '13px', fontWeight: 600 }}>
+                              {movie.match}% Match
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </Link>
-                </motion.div>
-              ))}
+                    </Link>
+                  </motion.div>
+                ))}
             </div>
           </motion.div>
+          )
         )}
 
       </div>

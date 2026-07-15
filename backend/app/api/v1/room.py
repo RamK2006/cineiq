@@ -4,6 +4,8 @@ import json
 import structlog
 import uuid
 
+from app.core.config import settings
+
 logger = structlog.get_logger()
 router = APIRouter(prefix="/room", tags=["watch-party"])
 
@@ -11,12 +13,19 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, Set[WebSocket]] = {}
 
-    async def connect(self, room_id: str, websocket: WebSocket):
+    async def connect(self, room_id: str, websocket: WebSocket) -> bool:
+        room_connections = self.active_connections.get(room_id, set())
+        if len(room_connections) >= settings.max_room_participants:
+            await websocket.close(code=1008, reason="Room is full")
+            logger.info("ws_client_rejected_room_full", room_id=room_id)
+            return False
+
         await websocket.accept()
         if room_id not in self.active_connections:
             self.active_connections[room_id] = set()
         self.active_connections[room_id].add(websocket)
         logger.info("ws_client_connected", room_id=room_id)
+        return True
 
     def disconnect(self, room_id: str, websocket: WebSocket):
         if room_id in self.active_connections:
@@ -42,7 +51,9 @@ async def create_room():
 @router.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str):
     """WebSocket endpoint for real-time room sync."""
-    await manager.connect(room_id, websocket)
+    accepted = await manager.connect(room_id, websocket)
+    if not accepted:
+        return
     try:
         while True:
             data = await websocket.receive_text()
