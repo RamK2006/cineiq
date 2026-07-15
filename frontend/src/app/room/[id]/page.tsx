@@ -25,8 +25,10 @@ export default function WatchRoomPage() {
 
   useEffect(() => {
     // Scaffold WebSocket connection
-    console.log(`Connecting to WS room: ${roomId}`);
-    return () => console.log('Disconnecting WS');
+    // TODO: Replace with actual WebSocket connection when backend is ready
+    return () => {
+      // Cleanup WebSocket connection on unmount
+    };
   }, [roomId]);
 
   const handlePlayPause = () => {

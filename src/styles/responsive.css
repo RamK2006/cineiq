@@ -1,0 +1,101 @@
+/* Responsive CSS media queries for CineIQ */
+
+/* Mobile first approach - base styles for mobile */
+
+/* Small devices (phones, 640px and up) */
+@media (min-width: 640px) {
+  .movie-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .hero-content {
+    padding: 2rem;
+  }
+  .search-bar {
+    max-width: 28rem;
+  }
+}
+
+/* Medium devices (tablets, 768px and up) */
+@media (min-width: 768px) {
+  .movie-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .sidebar {
+    width: 16rem;
+  }
+  .content-area {
+    margin-left: 16rem;
+  }
+  .hero-content {
+    padding: 3rem;
+  }
+  .footer-content {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+}
+
+/* Large devices (desktops, 1024px and up) */
+@media (min-width: 1024px) {
+  .movie-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .search-bar {
+    max-width: 32rem;
+  }
+  .hero-title {
+    font-size: 3rem;
+  }
+  .nav-links {
+    display: flex;
+  }
+  .mobile-menu {
+    display: none;
+  }
+}
+
+/* Extra large devices (large desktops, 1280px and up) */
+@media (min-width: 1280px) {
+  .movie-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .container {
+    max-width: 80rem;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  .movie-card {
+    transition: none;
+  }
+  .movie-card:hover {
+    transform: none;
+  }
+  button, a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Print styles */
+@media print {
+  .sidebar, .nav, .mobile-menu, .watch-party {
+    display: none !important;
+  }
+  .content-area {
+    margin-left: 0 !important;
+  }
+  .movie-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
