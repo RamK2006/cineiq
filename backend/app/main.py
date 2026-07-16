@@ -24,6 +24,12 @@ def get_request_id(request: Request) -> str:
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("cineiq_starting", host=settings.backend_host, port=settings.backend_port)
+    if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
+        if settings.environment == "development":
+            logger.warning(
+                "auth_bypass_active",
+                message="Clerk secret key is missing or default. Authentication bypass is active in development mode."
+            )
     yield
     # Shutdown
     logger.info("cineiq_stopped")
