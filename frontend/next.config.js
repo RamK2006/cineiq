@@ -1,4 +1,10 @@
 /** @type {import('next').NextConfig} */
+
+const defaultApiUrl =
+  process.env.NODE_ENV === 'production'
+    ? '/api/v1'
+    : 'http://localhost:8001';
+
 const nextConfig = {
   reactStrictMode: true,
   images: {
@@ -12,9 +18,7 @@ const nextConfig = {
   },
   env: {
     NEXT_PUBLIC_API_URL:
-      process.env.NODE_ENV === 'production'
-        ? '/api/v1'
-        : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'),
+      process.env.NEXT_PUBLIC_API_URL || defaultApiUrl,
   },
 };
 
