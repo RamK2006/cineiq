@@ -6,6 +6,7 @@ Generates and uploads Sentence-Transformers embeddings to Qdrant.
 """
 
 import os
+import sys
 import logging
 import pickle
 

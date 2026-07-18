@@ -1,6 +1,4 @@
 import pytest
-from fastapi import status
-from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocketDisconnect
 
 from app.core.config import settings
@@ -58,7 +56,7 @@ def test_room_websocket_max_participants_rejected(client, monkeypatch):
     room_id = "full_room_123"
     
     # Connect the first client (should be allowed)
-    with client.websocket_connect(f"/api/v1/room/ws/{room_id}") as ws1:
+    with client.websocket_connect(f"/api/v1/room/ws/{room_id}"):
         # Attempt to connect the second client (should be rejected)
         with pytest.raises(WebSocketDisconnect) as excinfo:
             with client.websocket_connect(f"/api/v1/room/ws/{room_id}"):
