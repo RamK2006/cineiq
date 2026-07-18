@@ -3,7 +3,6 @@ import time
 
 import structlog
 import traceback
-import time
 import uuid
 
 from fastapi import FastAPI, Request
@@ -12,7 +11,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import datetime
-import structlog
 import structlog.contextvars
 
 from app.api.v1 import api_router

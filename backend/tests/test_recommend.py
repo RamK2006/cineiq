@@ -1,6 +1,3 @@
-import pytest
-from unittest import mock
-import httpx
 from fastapi import HTTPException
 
 from app.main import app

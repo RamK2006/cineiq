@@ -1,7 +1,5 @@
-import pytest
 from unittest import mock
 import httpx
-import sys
 from app.core.config import settings
 
 def test_search_valid_request(client, monkeypatch):

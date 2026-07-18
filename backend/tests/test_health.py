@@ -1,4 +1,3 @@
-import pytest
 from unittest import mock
 from app.core.config import settings
 
