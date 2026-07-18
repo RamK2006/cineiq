@@ -21,8 +21,10 @@ export default function WatchRoomPage() {
 
   useEffect(() => {
     // Scaffold WebSocket connection
-    console.log(`Connecting to WS room: ${roomId}`);
-    return () => console.log('Disconnecting WS');
+    // TODO: Replace with actual WebSocket connection when backend is ready
+    return () => {
+      // Cleanup WebSocket connection on unmount
+    };
   }, [roomId]);
 
   const handlePlayPause = () => {
@@ -51,6 +53,7 @@ export default function WatchRoomPage() {
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               onClick={handlePlayPause}
+              aria-label="Play video"
               style={{ background: 'var(--accent-primary)', border: 'none', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 0 30px rgba(229,9,20,0.5)' }}
             >
               <Play size={40} fill="white" color="white" style={{ marginLeft: '6px' }} />
@@ -60,7 +63,7 @@ export default function WatchRoomPage() {
 
         {/* Video Controls Bottom Bar */}
         <div className="glass-panel" style={{ position: 'absolute', bottom: '20px', left: '20px', right: '320px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <button onClick={handlePlayPause} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+          <button onClick={handlePlayPause} aria-label={isPlaying ? 'Pause video' : 'Play video'} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
             {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
           </button>
           
@@ -70,8 +73,12 @@ export default function WatchRoomPage() {
 
           <span style={{ fontFamily: 'var(--font-body)', fontSize: '14px' }}>00:00 / 02:45:00</span>
           
-          <Volume2 size={20} />
-          <Maximize size={20} />
+          <button aria-label="Adjust volume" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+            <Volume2 size={20} />
+          </button>
+          <button aria-label="Toggle fullscreen" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+            <Maximize size={20} />
+          </button>
         </div>
       </div>
 
@@ -111,6 +118,7 @@ export default function WatchRoomPage() {
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               placeholder="Type a message..."
+              aria-label="Chat message"
               className="input-glass"
               style={{ padding: '10px 16px', fontSize: '14px' }}
             />

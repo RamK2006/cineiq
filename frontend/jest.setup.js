@@ -58,10 +58,49 @@ global.mockNavigation = {
   }
 };
 
+// Mock global fetch for API calls in test environments
+global.fetch = jest.fn().mockImplementation((url) => {
+  if (url.includes('/recommend/trending')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        algorithm: 'trending',
+        movies: [
+          {
+            id: '1',
+            title: 'Dune: Part Two',
+            poster_path: 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2JGqpTd4p.jpg',
+            vote_average: 8.3,
+            genres: ['Sci-Fi', 'Adventure'],
+            match_score: 0.98
+          }
+        ]
+      })
+    });
+  }
+  if (url.includes('/recommend/personalized')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        algorithm: 'personalized',
+        movies: [
+          { id: '1', title: 'Dune: Part Two', poster_path: 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2JGqpTd4p.jpg', vote_average: 8.3, genres: ['Sci-Fi'], match_score: 0.98 },
+          { id: '2', title: 'Oppenheimer', poster_path: 'https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg', vote_average: 8.9, genres: ['Drama'], match_score: 0.98 },
+          { id: '3', title: 'Poor Things', poster_path: 'https://image.tmdb.org/t/p/w500/kCGlIMHnOm8PhcbTi03XQ5VGe1T.jpg', vote_average: 8.0, genres: ['Comedy'], match_score: 0.98 },
+          { id: '4', title: 'Interstellar', poster_path: 'https://image.tmdb.org/t/p/w500/gEU2QlsE1ZEbKU01E8XgK31rGfQ.jpg', vote_average: 8.6, genres: ['Sci-Fi'], match_score: 0.98 },
+          { id: '5', title: 'Inception', poster_path: 'https://image.tmdb.org/t/p/w500/oYuLEt3zVCKqA3F0B7I2G0kE7Y.jpg', vote_average: 8.8, genres: ['Sci-Fi'], match_score: 0.98 },
+          { id: '6', title: 'Arrival', poster_path: 'https://image.tmdb.org/t/p/w500/x2FJsf1ElAgr63Y3PNPtJrcmpoe.jpg', vote_average: 8.0, genres: ['Sci-Fi'], match_score: 0.98 }
+        ]
+      })
+    });
+  }
+  return Promise.reject(new Error('Unknown Endpoint'));
+});
+
 // Mock next/image
 jest.mock('next/image', () => {
   const React = require('react');
-  return function MockImage({ src, alt, ...props }) {
+  return function MockImage({ src, alt, fill, sizes, priority, placeholder, blurDataURL, ...props }) {
     // eslint-disable-next-line @next/next/no-img-element
     return React.createElement('img', { src, alt, ...props });
   };

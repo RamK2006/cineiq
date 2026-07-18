@@ -2,10 +2,19 @@
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    domains: ['image.tmdb.org'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'image.tmdb.org',
+        pathname: '/t/p/**',
+      },
+    ],
   },
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NODE_ENV === 'production' ? '/api/v1' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'),
+    NEXT_PUBLIC_API_URL:
+      process.env.NODE_ENV === 'production'
+        ? '/api/v1'
+        : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'),
   },
 };
 
