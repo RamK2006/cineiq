@@ -1,19 +1,35 @@
-import type { Metadata } from 'next';
-import HomeClient from './HomeClient';
+'use client';
 
-export const metadata: Metadata = {
-  title: 'CineIQ | Discover Movies Together',
-  description: 'Discover trending and AI-powered movie recommendations.',
-  openGraph: {
-    title: 'CineIQ | Discover Movies Together',
-    description: 'Discover trending and AI-powered movie recommendations.',
-    type: 'website',
-    images: ['/default-og.jpg']
-  }
+import { useEffect, useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { Play, Info } from 'lucide-react';
+import Link from 'next/link';
+import Image from 'next/image';
+import { fetchTrendingMovies, fetchPersonalizedMovies, MovieItem } from '../lib/api';
+import Skeleton from '../components/Skeleton';
+import ErrorState from '../components/ErrorState';
+
+const BLUR_PLACEHOLDER = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyIDMiPjxyZWN0IHdpZHRoPSIyIiBoZWlnaHQ9IjMiIGZpbGw9IiMxYTFhMmUiLz48L3N2Zz4=";
+
+// Hardcoded fallback data to keep site functioning if backend is offline
+const MOCK_HERO_MOVIE = {
+  id: '1',
+  title: 'Dune: Part Two',
+  overview: 'Paul Atreides unites with Chani and the Fremen while on a warpath of revenge against the conspirators who destroyed his family.',
+  backdrop: 'https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg',
+  match: '98% Match'
 };
 
+const MOCK_TRENDING_MOVIES = [
+  { id: '1', title: 'Dune: Part Two', poster: 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2JGqpTd4p.jpg' },
+  { id: '2', title: 'Oppenheimer', poster: 'https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg' },
+  { id: '3', title: 'Poor Things', poster: 'https://image.tmdb.org/t/p/w500/kCGlIMHnOm8PhcbTi03XQ5VGe1T.jpg' },
+  { id: '4', title: 'Interstellar', poster: 'https://image.tmdb.org/t/p/w500/gEU2QlsE1ZEbKU01E8XgK31rGfQ.jpg' },
+  { id: '5', title: 'Inception', poster: 'https://image.tmdb.org/t/p/w500/oYuLEt3zVCKqA3F0B7I2G0kE7Y.jpg' },
+  { id: '6', title: 'Arrival', poster: 'https://image.tmdb.org/t/p/w500/x2FJsf1ElAgr63Y3PNPtJrcmpoe.jpg' }
+];
+
 export default function HomePage() {
-  return <HomeClient />;
   const [typedText, setTypedText] = useState('');
   const [hero, setHero] = useState<any>(null);
   const [trending, setTrending] = useState<any[]>([]);
@@ -80,20 +96,17 @@ export default function HomePage() {
   }, [loadData]);
 
   useEffect(() => {
-    const fullText = "Discover films that match your soul.";
-
     let i = 0;
     const interval = setInterval(() => {
-        if (i <= fullText.length) {
-            setTypedText(fullText.slice(0, i));
-            i++;
-        } else {
-            clearInterval(interval);
-        }
+      if (i <= fullText.length) {
+        setTypedText(fullText.slice(0, i));
+        i++;
+      } else {
+        clearInterval(interval);
+      }
     }, 50);
-
     return () => clearInterval(interval);
-}, []);
+  }, []);
 
   if (loading) {
     return (
