@@ -7,6 +7,7 @@ Generates and uploads Sentence-Transformers embeddings to Qdrant.
 
 import os
 import logging
+import pickle
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cineiq.train")
@@ -17,17 +18,38 @@ NCF_MODEL_PATH = os.path.join(MODEL_DIR, "ncf_v1.pt")
 
 def train_svd():
     """Train SVD model using Surprise."""
-    log.info("Starting SVD training (Scaffolded)...")
+    log.info("Starting SVD training...")
     os.makedirs(MODEL_DIR, exist_ok=True)
-    # Placeholder for Surprise library SVD
-    with open(SVD_MODEL_PATH, "w") as f:
-        f.write("mock_svd_model")
+    
+    try:
+        from surprise import Dataset, SVD
+    except ImportError:
+        log.error("scikit-surprise is not installed. Run `pip install scikit-surprise`.")
+        sys.exit(1)
+
+    # Load the built-in ml-100k dataset
+    log.info("Loading ml-100k dataset...")
+    data = Dataset.load_builtin('ml-100k')
+    
+    # Build full trainset
+    trainset = data.build_full_trainset()
+    
+    # Train SVD
+    log.info("Training SVD model...")
+    algo = SVD()
+    algo.fit(trainset)
+    
+    # Save the model
+    with open(SVD_MODEL_PATH, "wb") as f:
+        pickle.dump(algo, f)
+        
     log.info(f"SVD Model saved to {SVD_MODEL_PATH}")
 
 def train_ncf():
     """Train Neural Collaborative Filtering using PyTorch."""
     log.info("Starting NCF training (Scaffolded)...")
     # Placeholder for PyTorch NCF
+    os.makedirs(MODEL_DIR, exist_ok=True)
     with open(NCF_MODEL_PATH, "w") as f:
         f.write("mock_ncf_model")
     log.info(f"NCF Model saved to {NCF_MODEL_PATH}")
