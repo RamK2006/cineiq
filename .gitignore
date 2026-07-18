@@ -19,5 +19,5 @@ htmlcov/
 .coverage
 .DS_Store
 .vercel
-venv
-coverage/
+venv/
+.venv/
