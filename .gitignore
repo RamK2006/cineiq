@@ -21,3 +21,6 @@ htmlcov/
 .vercel
 venv/
 .venv/
+venv
+coverage/
+.clerk/

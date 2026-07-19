@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import Navigation from '@/components/Navigation';
+import { ClerkProvider } from '@clerk/nextjs';
 
 export const metadata: Metadata = {
   title: 'CINEIQ | Discover Movies Together',
@@ -12,15 +13,19 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_test_Y2luZWlxLmNsZXJrLmFjY291bnRzLmRldiQ';
+
   return (
-    <html lang="en">
-      <body>
-        <Navigation />
-        <a href="#main-content" className="skip-link">Skip to main content</a>
-        <div id="main-content">
-          {children}
-        </div>
-      </body>
-    </html>
+    <ClerkProvider publishableKey={publishableKey}>
+      <html lang="en">
+        <body>
+          <Navigation />
+          <a href="#main-content" className="skip-link">Skip to main content</a>
+          <div id="main-content">
+            {children}
+          </div>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

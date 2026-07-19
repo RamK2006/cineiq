@@ -4,11 +4,15 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Play, Pause, Maximize, Volume2, Users, MessageSquare } from 'lucide-react';
 import { useParams } from 'next/navigation';
+import { useUser } from '@clerk/nextjs';
 
 export default function WatchRoomPage() {
   const params = useParams();
   const roomId = params.id as string;
   
+  const { user } = useUser();
+  const userName = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? 'You';
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [messages, setMessages] = useState<{user: string, text: string}[]>([
@@ -17,7 +21,7 @@ export default function WatchRoomPage() {
   const [chatInput, setChatInput] = useState('');
 
   // Mock participants
-  const participants = ['You', 'Alex', 'Sarah'];
+  const participants = [userName, 'Alex', 'Sarah'];
 
   useEffect(() => {
     // Scaffold WebSocket connection
@@ -35,7 +39,7 @@ export default function WatchRoomPage() {
   const handleChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput) return;
-    setMessages(prev => [...prev, { user: 'You', text: chatInput }]);
+    setMessages(prev => [...prev, { user: userName, text: chatInput }]);
     setChatInput('');
   };
 

@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     next_public_clerk_publishable_key: str = ""
     clerk_audience: str = ""
 
+    # Rate Limiting
+    rate_limit_enabled: bool = True
+    rate_limit_global: str = "100/minute"
+    rate_limit_semantic_search: str = "10/minute"
+
     # External APIs
     tmdb_api_key: str = ""
     

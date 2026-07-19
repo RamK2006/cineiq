@@ -1,8 +1,10 @@
 'use client';
 
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import { Settings } from 'lucide-react';
+import { useUser } from '@clerk/nextjs';
 
 const tasteData = [
   { subject: 'Sci-Fi', A: 90, fullMark: 100 },
@@ -13,10 +15,19 @@ const tasteData = [
   { subject: 'Horror', A: 40, fullMark: 100 },
 ];
 
-export default function ProfilePage() {
+export default function ProfileClient() {
+  const { user, isLoaded } = useUser();
+
+  const userInitials = user?.firstName && user?.lastName 
+    ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
+    : user?.fullName?.[0]?.toUpperCase() ?? user?.primaryEmailAddress?.emailAddress?.[0]?.toUpperCase() ?? 'U';
+
+  const userName = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? 'User';
+  const userSubtitle = user?.primaryEmailAddress?.emailAddress ?? 'Member since 2024';
+
   return (
     <main style={{ paddingTop: '100px', minHeight: '100vh', padding: '100px 5% 40px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '40px', maxWidth: '1200px', margin: '0 auto' }}>
+      <div className="profile-container" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '40px', maxWidth: '1200px', margin: '0 auto' }}>
         
         {/* Left Col: User Card */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -25,16 +36,40 @@ export default function ProfilePage() {
               <Settings size={20} />
             </button>
             
-            <div style={{ 
-              width: '120px', height: '120px', borderRadius: '50%', 
-              background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-              margin: '0 auto 20px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '48px', fontWeight: 700
-            }}>
-              J
-            </div>
-            <h2 style={{ fontSize: '28px', marginBottom: '4px' }}>John Doe</h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '15px' }}>Member since 2024</p>
+            {!isLoaded ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: '120px', height: '120px', borderRadius: '50%', marginBottom: '20px', background: 'rgba(255,255,255,0.05)', animation: 'pulse 1.5s infinite' }} />
+                <div style={{ width: '150px', height: '24px', borderRadius: '4px', marginBottom: '8px', background: 'rgba(255,255,255,0.05)', animation: 'pulse 1.5s infinite' }} />
+                <div style={{ width: '100px', height: '16px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', animation: 'pulse 1.5s infinite' }} />
+              </div>
+            ) : (
+              <>
+                {user?.imageUrl ? (
+                  <Image 
+                    src={user.imageUrl} 
+                    alt={userName}
+                    width={120}
+                    height={120}
+                    style={{ 
+                      borderRadius: '50%', 
+                      margin: '0 auto 20px', display: 'block', objectFit: 'cover',
+                      border: '2px solid var(--accent-secondary)'
+                    }}
+                  />
+                ) : (
+                  <div style={{ 
+                    width: '120px', height: '120px', borderRadius: '50%', 
+                    background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                    margin: '0 auto 20px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '48px', fontWeight: 700
+                  }}>
+                    {userInitials}
+                  </div>
+                )}
+                <h2 style={{ fontSize: '28px', marginBottom: '4px' }}>{userName}</h2>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '15px' }}>{userSubtitle}</p>
+              </>
+            )}
             
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '32px', textAlign: 'center' }}>
               <div>

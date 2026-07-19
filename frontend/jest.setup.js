@@ -132,7 +132,7 @@ jest.mock('framer-motion', () => {
     ...actual,
     motion: customMotion,
     AnimatePresence: ({ children }) => children,
-    useScroll: () => ({ scrollY: { onChange: jest.fn() } }),
+    useScroll: () => ({ scrollY: { onChange: jest.fn(), on: jest.fn(() => jest.fn()) } }),
     useTransform: () => {},
   };
 });
@@ -154,4 +154,26 @@ jest.mock('recharts', () => {
     Radar: () => React.createElement('div', { 'data-testid': 'radar' }),
   };
 });
+
+// Mock Clerk
+jest.mock('@clerk/nextjs', () => {
+  const React = require('react');
+  return {
+    ClerkProvider: ({ children }) => React.createElement('div', { 'data-testid': 'clerk-provider' }, children),
+    SignedIn: ({ children }) => null,
+    SignedOut: ({ children }) => children,
+    SignInButton: ({ children }) => children,
+    UserButton: () => React.createElement('div', { 'data-testid': 'user-button' }),
+    useUser: () => ({
+      isLoaded: true,
+      isSignedIn: true,
+      user: {
+        fullName: 'John Doe',
+        primaryEmailAddress: null,
+        imageUrl: null,
+      },
+    }),
+  };
+});
+
 
