@@ -1,10 +1,9 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Query
 from typing import List, Optional
 from pydantic import BaseModel
 import structlog
 import httpx
 
-from app.core.security import get_current_user
 from app.core.config import settings
 
 logger = structlog.get_logger()

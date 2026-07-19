@@ -1,4 +1,7 @@
 from contextlib import asynccontextmanager
+import time
+
+import structlog
 import traceback
 import time
 import uuid
@@ -8,22 +11,32 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import datetime
 import structlog
 import structlog.contextvars
 
+from app.api.v1 import api_router
 from app.core.config import settings
-
 logger = structlog.get_logger()
+
+HEALTH_ERROR_PREFIX = "error:"
 
 
 def get_request_id(request: Request) -> str:
     """Return the request's correlation ID, generating one only as a fallback."""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("cineiq_starting", host=settings.backend_host, port=settings.backend_port)
+    if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
+        if settings.environment == "development":
+            logger.warning(
+                "auth_bypass_active",
+                message="Clerk secret key is missing or default. Authentication bypass is active in development mode."
+            )
     yield
     # Shutdown
     logger.info("cineiq_stopped")
@@ -130,31 +143,70 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
-from app.api.v1 import api_router
 app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/health")
 async def health_check():
-    checks = {}
-    
+    # Single UTC timestamp used for every service in this request.
+    last_checked = (
+        datetime.datetime.now(datetime.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
     # Check Redis
     try:
         from app.db.session import get_redis
         redis = get_redis()
         if redis:
             redis.ping()
-            checks["redis"] = "ok"
+            redis_status = "ok"
         else:
-            checks["redis"] = "not_configured"
+            redis_status = "not_configured"
     except Exception as e:
-        checks["redis"] = f"error: {str(e)[:100]}"
-        
+        redis_status = f"{HEALTH_ERROR_PREFIX}{str(e)[:100]}"
+
     # Check Gemini API
-    checks["gemini_api"] = "configured" if settings.gemini_api_key else "not_configured"
-    
-    all_ok = all(v in ("ok", "configured", "not_configured") for v in checks.values())
-    
-    return {
-        "status": "healthy" if all_ok else "degraded",
-        "checks": checks
+    gemini_status = "configured" if settings.gemini_api_key else "not_configured"
+
+    checks = {
+        "redis": {"status": redis_status, "last_checked": last_checked},
+        "gemini_api": {"status": gemini_status, "last_checked": last_checked},
     }
+
+    # Define required services that must be configured and operational for "healthy"
+    required_services = {"redis", "gemini_api"}
+
+    # Determine if any required service is not configured
+    any_required_not_configured = any(
+        service in required_services and v["status"] == "not_configured"
+        for service, v in checks.items()
+    )
+
+    # Determine if any required service has an error
+    any_required_error = any(
+        service in required_services
+        and v["status"].startswith(HEALTH_ERROR_PREFIX)
+        for service, v in checks.items()
+    )
+
+    if any_required_not_configured:
+        overall_status = "not_configured"
+    elif any_required_error:
+        overall_status = "degraded"
+    else:
+        # All required services are ok/configured; check optional services
+        any_optional_error = any(
+            service not in required_services
+            and v["status"].startswith(HEALTH_ERROR_PREFIX)
+            for service, v in checks.items()
+        )
+        overall_status = "degraded" if any_optional_error else "healthy"
+
+    status_code = 503 if overall_status == "not_configured" else 200
+
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": overall_status, "checks": checks},
+    )
