@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Auth
     clerk_secret_key: str = ""
     next_public_clerk_publishable_key: str = ""
+    clerk_audience: str = ""
 
     # External APIs
     tmdb_api_key: str = ""

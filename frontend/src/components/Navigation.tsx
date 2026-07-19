@@ -15,9 +15,10 @@ export default function Navigation() {
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    return scrollY.onChange((latest) => {
+    const unsubscribe = scrollY.on("change", (latest) => {
       setIsScrolled(latest > 50);
     });
+    return () => unsubscribe();
   }, [scrollY]);
 
   // Lock body scroll when mobile menu is open
@@ -174,7 +175,7 @@ export default function Navigation() {
         {/* Desktop Navigation Links */}
         <nav aria-label="Main navigation" className="nav-desktop">
           {navItems.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
               <Link
@@ -285,7 +286,7 @@ export default function Navigation() {
               {/* Navigation Links in Drawer */}
               <nav aria-label="Mobile navigation" className="nav-drawer-list">
                 {navItems.map((item) => {
-                  const isActive = pathname === item.href;
+                  const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                   const Icon = item.icon;
                   return (
                     <motion.div key={item.href} variants={itemVariants}>

@@ -1,5 +1,6 @@
 # CINEIQ 🎬
 
+![CI](https://github.com/RamK2006/cineiq/actions/workflows/ci.yml/badge.svg)
 **Next-Generation AI-Powered Movie Recommendation Platform**
 
 
@@ -65,6 +66,27 @@ cd frontend
 npm install
 npm run dev
 ```
+
+## Deployment
+
+### Vercel monorepo deployment
+
+CINEIQ uses a single Vercel project configured from the repository root.
+The root `vercel.json` is the source of truth for both applications:
+
+- `frontend/package.json` is built with the Next.js runtime.
+- `backend/vercel_entry.py` is deployed with the Python runtime.
+- Requests to `/api/*` are routed to the FastAPI backend.
+- All remaining requests are served by the Next.js frontend.
+
+When importing the repository into Vercel:
+
+1. Keep the project root directory set to the repository root.
+2. Do not set `frontend/` as the Vercel Root Directory.
+3. Configure the environment variables from `.env.example`.
+4. Set `NEXT_PUBLIC_API_URL` only when the frontend should use an external backend. If it is not set, production uses the same-origin `/api/v1` endpoint and local development uses `http://localhost:8001`.
+
+Only the root `vercel.json` should exist. Adding another Vercel configuration inside `frontend/` can cause Vercel to select a different deployment strategy.
 
 ## Technology Stack
 

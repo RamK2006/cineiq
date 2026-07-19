@@ -46,7 +46,12 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
     if not credentials:
         # If no credentials but we're in dev/test, return dummy user
         if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
-            return {"sub": "dev_user_123", "role": "user"}
+            if settings.environment == "development":
+                return {"sub": "dev_user_123", "role": "user"}
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service unavailable"
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated"
@@ -56,7 +61,12 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
     
     # If no valid keys, allow bypass for development/testing
     if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
-        return {"sub": "dev_user_123", "role": "user"}
+        if settings.environment == "development":
+            return {"sub": "dev_user_123", "role": "user"}
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable"
+        )
 
     jwks = await get_jwks()
     if not jwks:
@@ -82,11 +92,19 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 
         if rsa_key:
             public_key = jwt.algorithms.RSAAlgorithm.from_jwk(rsa_key)
+            
+            options = {}
+            if settings.clerk_audience:
+                options["verify_aud"] = True
+            else:
+                options["verify_aud"] = False
+
             payload = jwt.decode(
                 token,
                 public_key,
                 algorithms=["RS256"],
-                options={"verify_aud": False}
+                audience=settings.clerk_audience if settings.clerk_audience else None,
+                options=options
             )
             return payload
             

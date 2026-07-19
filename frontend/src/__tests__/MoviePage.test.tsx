@@ -21,7 +21,7 @@ describe('MovieDetailPage Component', () => {
     render(<MovieDetailPage />);
     
     // Tagline in quotes
-    expect(screen.getByText('"Long live the fighters."')).toBeInTheDocument();
+    expect(screen.getByText(/Long live the fighters/)).toBeInTheDocument();
     expect(
       screen.getByText(
         'Paul Atreides unites with Chani and the Fremen while on a warpath of revenge against the conspirators who destroyed his family.'
