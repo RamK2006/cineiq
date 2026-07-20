@@ -3,7 +3,7 @@ import { ThemeProvider } from 'next-themes'
 import type { Metadata } from 'next';
 import './globals.css';
 import Navigation from '@/components/Navigation';
-import { ClerkProvider } from '@clerk/nextjs';
+import CustomCursor from '@/components/CustomCursor';import { ClerkProvider } from '@clerk/nextjs';
 
 export const metadata: Metadata = {
   title: 'CINEIQ | Discover Movies Together',
@@ -19,14 +19,16 @@ export default function RootLayout({
 
     <html lang="en" suppressHydrationWarning>
       <body>
-        <ThemeProvider attribute="data-theme">
-          <Navigation />
-          <a href="#main-content" className="skip-link">Skip to main content</a>
-          <div id="main-content">
-            {children}
-          </div>
-
-        </ThemeProvider>
+        <ClerkProvider>
+          <ThemeProvider attribute="data-theme">
+            <Navigation />
+            <CustomerCursor />
+            <a href="#main-content" className="skip-link">Skip to main content</a>   
+            <div id="main-content">
+              {children}
+            </div>
+          </ThemeProvider>
+        </ClerkProvider>
       </body>
     </html>
 
