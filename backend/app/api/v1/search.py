@@ -1,12 +1,11 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Query, Request
 from typing import List, Optional
 from pydantic import BaseModel
 import structlog
 import httpx
-import json
 
-from app.core.security import get_current_user
 from app.core.config import settings
+from app.core.rate_limit import limiter
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/search", tags=["search"])
@@ -23,7 +22,9 @@ class SearchResponse(BaseModel):
     results: List[SearchResult]
 
 @router.get("/semantic", response_model=SearchResponse)
+@limiter.limit(settings.rate_limit_semantic_search)
 async def semantic_search(
+    request: Request,
     q: str = Query(..., description="Natural language search query"),
     limit: int = Query(10, le=50)
 ):

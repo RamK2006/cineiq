@@ -3,6 +3,7 @@
 ## Project Status
 This project is cuurently  **Active** and under development. We are open to new  contributions!
 
+
 **Next-Generation AI-Powered Movie Recommendation Platform**
 
 
@@ -69,6 +70,7 @@ npm install
 npm run dev
 ```
 
+
 ## Roadmap
 -[ ] Implement user authentication (OAuth)
 -[ ] Add mobile responsiveness
@@ -83,6 +85,7 @@ We welcome contributions!
 3. Make your changes and commit: `git commit -m 'Add some feature'`
 4. Push to your branch: `git push origin feature/your-feature-name`
 5. Open a Pull Request.
+
 
 
 ## Technology Stack

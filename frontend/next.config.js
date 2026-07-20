@@ -1,7 +1,18 @@
+if (process.env.NODE_ENV !== 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
 /** @type {import('next').NextConfig} */
+
+const defaultApiUrl =
+  process.env.NODE_ENV === 'production'
+    ? '/api/v1'
+    : 'http://localhost:8001';
+
 const nextConfig = {
   reactStrictMode: true,
   images: {
+    unoptimized: process.env.NODE_ENV !== 'production',
     remotePatterns: [
       {
         protocol: 'https',
@@ -11,7 +22,8 @@ const nextConfig = {
     ],
   },
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NODE_ENV === 'production' ? '/api/v1' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'),
+    NEXT_PUBLIC_API_URL:
+      process.env.NEXT_PUBLIC_API_URL || defaultApiUrl,
   },
 };
 
