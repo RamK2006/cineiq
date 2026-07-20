@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import Navigation from '@/components/Navigation';
-import { ClerkProvider } from '@clerk/nextjs';
+import ScrollToTopButton from '@/components/ScrollToTopButton';import { ClerkProvider } from '@clerk/nextjs';
 
 export const metadata: Metadata = {
   title: 'CINEIQ | Discover Movies Together',
@@ -21,11 +21,11 @@ export default function RootLayout({
         <body>
           <Navigation />
           <a href="#main-content" className="skip-link">Skip to main content</a>
-          <div id="main-content">
+<div id="main-content">
             {children}
           </div>
-        </body>
-      </html>
+          <ScrollToTopButton />
+        </body>      </html>
     </ClerkProvider>
   );
 }
