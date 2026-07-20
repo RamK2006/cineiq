@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Play, Pause, Maximize, Volume2, Users, MessageSquare } from 'lucide-react';
 import { useParams } from 'next/navigation';
@@ -15,32 +15,132 @@ export default function WatchRoomPage() {
     { user: 'System', text: 'Welcome to the Watch Party!' }
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [participants, setParticipants] = useState<string[]>(['You']);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  
+  const ws = useRef<WebSocket | null>(null);
+  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  const userIdRef = useRef<string | null>(null);
 
-  // Mock participants
-  const participants = ['You', 'Alex', 'Sarah'];
-
-  useEffect(() => {
-    // Scaffold WebSocket connection
+  const connectWebSocket = useCallback(() => {
+    // Basic fallback for token 
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') || '' : '';
+    // Normally would use env var for WS URL, using hardcoded local as per issue details
+    const wsUrl = `ws://localhost:8001/api/v1/room/ws/${roomId}${token ? `?token=${token}` : ''}`;
+    
     console.log(`Connecting to WS room: ${roomId}`);
-    return () => console.log('Disconnecting WS');
+    setConnectionStatus('connecting');
+    
+    ws.current = new WebSocket(wsUrl);
+
+    ws.current.onopen = () => {
+      console.log('Connected to WS');
+      setConnectionStatus('connected');
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+    };
+
+    ws.current.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'sync') {
+          if (message.data.action === 'play') {
+            setIsPlaying(true);
+          } else if (message.data.action === 'pause') {
+            setIsPlaying(false);
+          }
+          if (message.data.progress !== undefined) {
+            setProgress(message.data.progress);
+          }
+        } else if (message.type === 'chat') {
+          setMessages(prev => [...prev, { user: message.user || 'Unknown', text: message.data.text }]);
+        } else if (message.type === 'user_joined') {
+          if (!userIdRef.current) userIdRef.current = message.user; // capture our ID if it's the first time
+          setParticipants(prev => {
+             if (!prev.includes(message.user)) return [...prev, message.user];
+             return prev;
+          });
+          setMessages(prev => [...prev, { user: 'System', text: `${message.user} joined the room` }]);
+        } else if (message.type === 'user_left') {
+          setParticipants(prev => prev.filter(p => p !== message.user));
+          setMessages(prev => [...prev, { user: 'System', text: `${message.user} left the room` }]);
+        }
+      } catch (err) {
+        console.error('Failed to parse WS message', err);
+      }
+    };
+
+    ws.current.onclose = () => {
+      console.log('Disconnected from WS');
+      setConnectionStatus('disconnected');
+      // Auto-reconnect after 3 seconds
+      reconnectTimeout.current = setTimeout(connectWebSocket, 3000);
+    };
+    
+    ws.current.onerror = (error) => {
+      console.error('WS Error:', error);
+      ws.current?.close();
+    };
   }, [roomId]);
 
+  useEffect(() => {
+    connectWebSocket();
+    return () => {
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+      if (ws.current) ws.current.close();
+    };
+  }, [connectWebSocket]);
+
+  const emitSync = (action: string, newProgress?: number) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: 'sync',
+        data: {
+          action,
+          progress: newProgress !== undefined ? newProgress : progress
+        }
+      }));
+    }
+  };
+
   const handlePlayPause = () => {
-    setIsPlaying(!isPlaying);
-    // In real app, emit WS event here
+    const newIsPlaying = !isPlaying;
+    setIsPlaying(newIsPlaying);
+    emitSync(newIsPlaying ? 'play' : 'pause');
+  };
+  
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const newProgress = Math.min(100, Math.max(0, (x / rect.width) * 100));
+    setProgress(newProgress);
+    emitSync(isPlaying ? 'play' : 'pause', newProgress);
   };
 
   const handleChat = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput) return;
-    setMessages(prev => [...prev, { user: 'You', text: chatInput }]);
-    setChatInput('');
+    if (!chatInput.trim()) return;
+    
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: 'chat',
+        data: { text: chatInput }
+      }));
+      setMessages(prev => [...prev, { user: 'You', text: chatInput }]);
+      setChatInput('');
+    }
   };
 
   return (
     <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#000' }}>
       {/* Video Area */}
       <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        
+        {/* Connection Status Indicator */}
+        <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: 20 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: connectionStatus === 'connected' ? '#10b981' : connectionStatus === 'connecting' ? '#f59e0b' : '#ef4444' }} />
+          <span style={{ fontSize: 12, color: 'white', textTransform: 'capitalize' }}>{connectionStatus}</span>
+        </div>
+
         {/* Placeholder Video */}
         <div style={{ width: '100%', height: '100%', backgroundImage: 'url(https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg)', backgroundSize: 'cover', backgroundPosition: 'center', filter: isPlaying ? 'none' : 'brightness(0.6)' }} />
         
@@ -65,7 +165,7 @@ export default function WatchRoomPage() {
             {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
           </button>
           
-          <div style={{ flex: 1, height: '4px', background: 'rgba(255,255,255,0.2)', borderRadius: '2px', cursor: 'pointer' }}>
+          <div onClick={handleSeek} style={{ flex: 1, height: '4px', background: 'rgba(255,255,255,0.2)', borderRadius: '2px', cursor: 'pointer' }}>
             <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent-primary)', borderRadius: '2px', transition: 'width 0.1s' }} />
           </div>
 
@@ -87,11 +187,11 @@ export default function WatchRoomPage() {
         <div style={{ padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
             <Users size={16} color="var(--accent-secondary)" />
-            <span style={{ fontWeight: 600, fontSize: '14px' }}>Room Participants</span>
+            <span style={{ fontWeight: 600, fontSize: '14px' }}>Room Participants ({participants.length})</span>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {participants.map(p => (
-              <div key={p} style={{ background: 'rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: '999px', fontSize: '12px' }}>
+              <div key={p} style={{ background: 'rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', whiteSpace: 'nowrap' }}>
                 {p}
               </div>
             ))}
@@ -118,7 +218,8 @@ export default function WatchRoomPage() {
               placeholder="Type a message..."
               aria-label="Chat message"
               className="input-glass"
-              style={{ padding: '10px 16px', fontSize: '14px' }}
+              style={{ padding: '10px 16px', fontSize: '14px', width: '100%' }}
+              disabled={connectionStatus !== 'connected'}
             />
           </div>
         </form>
