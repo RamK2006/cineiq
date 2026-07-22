@@ -7,20 +7,21 @@ import structlog
 
 from app.core.config import settings
 
-logger = structlog.get_logger()
+logger = structlog.get_logger(__name__)
 
 security = HTTPBearer(auto_error=False)
 
 # Simple dictionary cache with timestamp since cachetools was removed
 _jwks_cache = {"data": None, "expires_at": 0}
 
+
 async def get_jwks():
     global _jwks_cache
     now = time.time()
-    
+
     if _jwks_cache["data"] and _jwks_cache["expires_at"] > now:
         return _jwks_cache["data"]
-    
+
     # Simple workaround if no key provided
     if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
         return None
@@ -31,18 +32,16 @@ async def get_jwks():
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 jwks_url,
-                headers={"Authorization": f"Bearer {settings.clerk_secret_key}"}
+                headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
             )
             if resp.status_code == 200:
                 jwks = resp.json()
-                _jwks_cache = {
-                    "data": jwks,
-                    "expires_at": now + 3600 # 1 hour
-                }
+                _jwks_cache = {"data": jwks, "expires_at": now + 3600}  # 1 hour
                 return jwks
     except Exception as e:
         logger.error("jwks_fetch_failed", error=str(e))
         return None
+
 
 async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
@@ -55,12 +54,11 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
                 detail="Authentication service unavailable"
             )
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
         )
-        
+
     token = credentials.credentials
-    
+
     # If no valid keys, allow bypass for development/testing
     if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
         if settings.environment == "development":
@@ -75,7 +73,7 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
         # Fallback if JWKS unavailable but keys are set - reject
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication configuration error"
+            detail="Authentication configuration error",
         )
 
     try:
@@ -88,38 +86,35 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
                     "kid": key["kid"],
                     "use": key["use"],
                     "n": key["n"],
-                    "e": key["e"]
+                    "e": key["e"],
                 }
                 break
 
         if rsa_key:
             public_key = jwt.algorithms.RSAAlgorithm.from_jwk(rsa_key)
-            
-            options = {}
-            if settings.clerk_audience:
-                options["verify_aud"] = True
-            else:
-                options["verify_aud"] = False
 
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=["RS256"],
-                audience=settings.clerk_audience if settings.clerk_audience else None,
-                options=options
-            )
+            audience = settings.clerk_jwt_audience or settings.clerk_audience
+            decode_kwargs = {"algorithms": ["RS256"]}
+            if audience:
+                decode_kwargs["audience"] = audience
+                decode_kwargs["options"] = {"verify_aud": True}
+            else:
+                decode_kwargs["options"] = {"verify_aud": False}
+
+            payload = jwt.decode(token, public_key, **decode_kwargs)
             return payload
-            
+
     except Exception as e:
+        logger.error("jwt_validation_failed", error=str(e), exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {str(e)}"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Unable to find appropriate key"
+        detail="Unable to find appropriate key",
     )
+
 
 async def get_current_user(payload: dict = Depends(verify_token)):
     user_id = payload.get("sub")

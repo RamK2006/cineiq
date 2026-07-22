@@ -163,7 +163,7 @@ async def semantic_search(
                                     if item.get("poster_path")
                                     else None
                                 ),
-                                similarity_score=0.9  # Mocked similarity
+                                similarity_score=0.9,  # Mocked similarity
                             )
                         )
         except Exception as e:
@@ -175,7 +175,7 @@ async def semantic_search(
                 id="12",
                 title="Arrival",
                 overview="A linguist works with the military to communicate with alien lifeforms.",
-                similarity_score=0.89
+                similarity_score=0.89,
             )
         ]
 
