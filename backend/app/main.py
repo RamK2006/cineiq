@@ -38,6 +38,21 @@ async def lifespan(app: FastAPI):
                 "auth_bypass_active",
                 message="Clerk secret key is missing or default. Authentication bypass is active in development mode."
             )
+
+    # --- Configure Google Gemini ONCE at startup (not per request) ---
+    if settings.gemini_api_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=settings.gemini_api_key)
+            logger.info("gemini_configured", model=settings.gemini_model)
+        except Exception as e:
+            logger.error("gemini_configuration_failed", error=str(e))
+    else:
+        logger.warning(
+            "gemini_not_configured",
+            message="GEMINI_API_KEY is not set; keyword extraction will be skipped.",
+        )
+
     yield
     # Shutdown
     logger.info("cineiq_stopped")
