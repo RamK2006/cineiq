@@ -39,9 +39,7 @@ async def get_jwks():
                 _jwks_cache = {"data": jwks, "expires_at": now + 3600}  # 1 hour
                 return jwks
     except Exception as e:
-        import logging
-
-        logging.getLogger("uvicorn").error(f"Failed to fetch JWKS: {e}")
+        logger.error("jwks_fetch_failed", error=str(e))
         return None
 
 
@@ -95,9 +93,10 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
         if rsa_key:
             public_key = jwt.algorithms.RSAAlgorithm.from_jwk(rsa_key)
 
+            audience = settings.clerk_jwt_audience or settings.clerk_audience
             decode_kwargs = {"algorithms": ["RS256"]}
-            if settings.clerk_jwt_audience:
-                decode_kwargs["audience"] = settings.clerk_jwt_audience
+            if audience:
+                decode_kwargs["audience"] = audience
                 decode_kwargs["options"] = {"verify_aud": True}
             else:
                 decode_kwargs["options"] = {"verify_aud": False}

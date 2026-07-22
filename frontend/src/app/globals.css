@@ -685,12 +685,58 @@ a {
   }
 }
 
+
+/* ─── Scroll To Top Button ─── */
+.scroll-to-top-btn {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text-primary);
+  cursor: pointer;
+  z-index: 40;
+  box-shadow: var(--glass-shadow);
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.scroll-to-top-btn:hover {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  box-shadow: 0 6px 20px rgba(229, 9, 20, 0.5);
+  transform: translateY(-2px);
+}
+
+.scroll-to-top-btn:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 4px;
+}
+
+@media (max-width: 768px) {
+  .scroll-to-top-btn {
+    bottom: 20px;
+    right: 20px;
+    width: 44px;
+    height: 44px;
+  }
+}
+
+
 /* ─── Custom Cursor ─── */
 body.custom-cursor-active,
 body.custom-cursor-active a,
 body.custom-cursor-active button {
   cursor: none;
 }
+
 
 .custom-cursor-dot {
   position: fixed;
