@@ -22,11 +22,10 @@
   --accent-hover: #F40612;
   --accent-secondary: #8B5CF6; /* Discovery Purple */
 
-  /* Text */
+/* Text */
   --text-primary: #FFFFFF;
   --text-secondary: #A1A1AA;
-  --text-muted: #71717A;
-
+  --text-muted: #84848F; /* lightened from #71717A: was 4.2:1 contrast (fails AA), now 5.5:1 */
   /* Typography */
   --font-display: 'Outfit', sans-serif;
   --font-body: 'Inter', sans-serif;
@@ -35,7 +34,19 @@
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  --radius-full: 9999px;
+--radius-full: 9999px;
+
+  /* Elevation (consistent shadow depths instead of one-off values) */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+
+  /* Motion */
+  --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 *, *::before, *::after {
@@ -51,8 +62,9 @@ body {
   line-height: 1.6;
   min-height: 100vh;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
-
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-display);
   line-height: 1.2;
@@ -73,8 +85,8 @@ a {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--glass-shadow);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
 }
-
 /* ─── Buttons ─── */
 .btn {
   display: inline-flex;
@@ -88,13 +100,16 @@ a {
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--transition-base), background var(--transition-base), box-shadow var(--transition-base);
 }
 
 .btn:hover {
   transform: scale(1.04);
 }
 
+.btn:active {
+  transform: scale(0.97);
+}
 .btn-primary {
   background: var(--accent-primary);
   color: white;
@@ -110,34 +125,37 @@ a {
   background: rgba(255, 255, 255, 0.1);
   color: white;
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--border-default);
 }
 
 .btn-glass:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
 }
-
 /* ─── Inputs ─── */
 .input-glass {
   width: 100%;
   padding: 14px 20px;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-full);
   color: white;
   font-family: var(--font-body);
   font-size: 15px;
   outline: none;
   backdrop-filter: blur(12px);
-  transition: all 0.2s ease;
+  transition: border-color var(--transition-base), box-shadow var(--transition-base), background var(--transition-base);
+}
+
+.input-glass:hover {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .input-glass:focus {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.05);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 4px rgba(229, 9, 20, 0.15);
 }
-
 .input-glass::placeholder {
   color: var(--text-muted);
 }
@@ -149,16 +167,17 @@ a {
   overflow: hidden;
   aspect-ratio: 2/3;
   cursor: pointer;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid var(--border-subtle);
+  transition: transform var(--transition-base), box-shadow var(--transition-base), border-color var(--transition-base);
   background: var(--bg-surface);
 }
 
 .movie-card:hover {
   transform: scale(1.05) translateY(-5px);
   z-index: 10;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-lg);
 }
-
 .movie-poster {
   width: 100%;
   height: 100%;
