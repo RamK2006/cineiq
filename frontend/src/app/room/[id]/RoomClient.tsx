@@ -44,9 +44,9 @@ export default function WatchRoomPage() {
   };
 
   return (
-    <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#000' }}>
+    <main className="room-container" style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#000' }}>
       {/* Video Area */}
-      <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      <div className="room-video-area" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {/* Placeholder Video */}
         <div style={{ width: '100%', height: '100%', backgroundImage: 'url(https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg)', backgroundSize: 'cover', backgroundPosition: 'center', filter: isPlaying ? 'none' : 'brightness(0.6)' }} />
         
@@ -66,7 +66,7 @@ export default function WatchRoomPage() {
         )}
 
         {/* Video Controls Bottom Bar */}
-        <div className="glass-panel" style={{ position: 'absolute', bottom: '20px', left: '20px', right: '320px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div className="glass-panel room-video-controls" style={{ position: 'absolute', bottom: '20px', left: '20px', right: '320px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
           <button onClick={handlePlayPause} aria-label={isPlaying ? 'Pause video' : 'Play video'} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
             {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
           </button>
@@ -87,7 +87,7 @@ export default function WatchRoomPage() {
       </div>
 
       {/* Right Sidebar: Chat & Participants */}
-      <div className="glass-panel" style={{ position: 'absolute', top: '80px', right: '20px', bottom: '20px', width: '280px', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.1)' }}>
+      <div className="glass-panel room-sidebar" style={{ position: 'absolute', top: '80px', right: '20px', bottom: '20px', width: '280px', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.1)' }}>
         
         {/* Participants */}
         <div style={{ padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
