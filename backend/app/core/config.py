@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     backend_cors_origins: str | List[str] = [
         "http://localhost:3000",
-        "https://*.vercel.app",
+        "https://cineiq.vercel.app",
     ]
     backend_host: str = "0.0.0.0"
     backend_port: int = 8001
