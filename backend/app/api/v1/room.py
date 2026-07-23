@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from typing import Dict, Set, Literal, Optional, Any
 from pydantic import BaseModel, ValidationError
 import json
