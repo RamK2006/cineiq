@@ -19,6 +19,8 @@ htmlcov/
 .coverage
 .DS_Store
 .vercel
+venv/
+.venv/
 venv
 coverage/
 .clerk/
