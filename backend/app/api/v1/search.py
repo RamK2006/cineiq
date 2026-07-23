@@ -3,8 +3,6 @@ import httpx
 import structlog
 from typing import List, Optional
 from pydantic import BaseModel
-import structlog
-import httpx
 import json
 import hashlib
 from app.db.session import get_redis
@@ -12,7 +10,6 @@ from fastapi import APIRouter, Query, Request
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.db.session import get_redis
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/search", tags=["search"])
