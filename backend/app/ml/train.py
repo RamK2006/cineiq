@@ -60,9 +60,45 @@ def train_ncf():
 
 def generate_embeddings():
     """Generate semantic embeddings for movies."""
-    log.info("Generating sentence-transformers embeddings (Scaffolded)...")
-    # Placeholder for SentenceTransformer('all-MiniLM-L6-v2')
-    log.info("Embeddings generated and uploaded to Qdrant.")
+    log.info("Generating sentence-transformers embeddings...")
+    try:
+        from sentence_transformers import SentenceTransformer
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import PointStruct, VectorParams, Distance
+        
+        # Add backend dir to sys path so we can import app.core.config
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        from app.core.config import settings
+    except ImportError as e:
+        log.error(f"Missing dependencies: {e}. Run `pip install sentence-transformers qdrant-client`")
+        return
+
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+    
+    collection_name = "movies"
+    if not client.collection_exists(collection_name):
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+        )
+    
+    # Mock data for demonstration. In production, this would load from a database or CSV.
+    movies = [
+        {"id": "1", "title": "Inception", "description": "A thief who steals corporate secrets through the use of dream-sharing technology is given the inverse task of planting an idea into the mind of a C.E.O."},
+        {"id": "2", "title": "Interstellar", "description": "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival."},
+        {"id": "3", "title": "The Dark Knight", "description": "When the menace known as the Joker wreaks havoc and chaos on the people of Gotham, Batman must accept one of the greatest psychological and physical tests of his ability to fight injustice."}
+    ]
+    
+    points = []
+    for idx, m in enumerate(movies):
+        vec = model.encode(m["description"]).tolist()
+        points.append(PointStruct(id=idx+1, vector=vec, payload={"movie_id": m["id"], "title": m["title"], "description": m["description"]}))
+        
+    client.upsert(collection_name=collection_name, points=points)
+    log.info(f"Embeddings generated and uploaded to Qdrant collection '{collection_name}'.")
 
 
 def train():
