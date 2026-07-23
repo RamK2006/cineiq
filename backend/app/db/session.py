@@ -6,6 +6,7 @@ logger = structlog.get_logger()
 
 _redis_client = None
 
+
 def get_redis():
     """Get or create Upstash Redis client."""
     global _redis_client
@@ -13,6 +14,7 @@ def get_redis():
         if settings.upstash_redis_url and settings.upstash_redis_token:
             try:
                 from upstash_redis import Redis
+
                 _redis_client = Redis(
                     url=settings.upstash_redis_url,
                     token=settings.upstash_redis_token,
