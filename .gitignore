@@ -20,5 +20,5 @@ htmlcov/
 .DS_Store
 .vercel
 venv
-.vercel
 coverage/
+.clerk/

@@ -22,7 +22,7 @@ describe('SemanticSearchPage Component', () => {
 
     // Type query
     act(() => {
-      fireEvent.change(input, { target: { value: 'space aliens' } });
+      fireEvent.change(input, { target: { value: 'sci-fi' } });
     });
 
     const form = input.closest('form')!;
