@@ -4,9 +4,11 @@ from pydantic import BaseModel
 import structlog
 import httpx
 import random
+import json
 import os
 import pickle
 import hashlib
+from app.db.session import get_redis
 
 from app.core.security import get_current_user
 from app.core.config import settings
@@ -53,6 +55,24 @@ def _hash_user_id_to_ml_id(user_id: str) -> str:
 async def _fetch_tmdb_movies(endpoint: str, limit: int = 20, page: int = 1) -> List[MovieItem]:
     if not settings.tmdb_api_key:
         return []
+
+    redis = get_redis()
+    cache_key = None
+    if endpoint == "movie/popular":
+        cache_key = f"tmdb:popular:page:{page}"
+    elif endpoint == "trending/movie/day":
+        cache_key = f"tmdb:trending:page:{page}"
+
+    if redis and cache_key:
+        try:
+            cached_data = redis.get(cache_key)
+            if cached_data:
+                logger.info("tmdb_cache_hit", key=cache_key)
+                items = json.loads(cached_data)
+                return [MovieItem(**item) for item in items][:limit]
+            logger.info("tmdb_cache_miss", key=cache_key)
+        except Exception as e:
+            logger.error("redis_cache_error", error=str(e))
         
     try:
         async with httpx.AsyncClient() as client:
@@ -78,6 +98,11 @@ async def _fetch_tmdb_movies(endpoint: str, limit: int = 20, page: int = 1) -> L
                             match_score=round(random.uniform(0.7, 0.98), 2)
                         )
                     )
+                if redis and cache_key:
+                    try:
+                        redis.setex(cache_key, 3600, json.dumps([m.dict() for m in movies]))
+                    except Exception as e:
+                        logger.error("redis_cache_set_error", error=str(e))
                 return movies
     except Exception as e:
         logger.error("tmdb_fetch_failed", endpoint=endpoint, error=str(e))

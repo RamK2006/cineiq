@@ -3,11 +3,13 @@ import httpx
 import structlog
 from typing import List, Optional
 from pydantic import BaseModel
+import json
+import hashlib
+from app.db.session import get_redis
 from fastapi import APIRouter, Query, Request
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.db.session import get_redis
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/search", tags=["search"])
@@ -166,6 +168,24 @@ async def semantic_search(
 
     # Fallback to TMDB Search
     results = []
+    
+    redis = None
+    cache_key = None
+    if settings.tmdb_api_key:
+        try:
+            redis = get_redis()
+            if redis:
+                query_hash = hashlib.md5(keywords.encode()).hexdigest()
+                cache_key = f"tmdb:search:{query_hash}"
+                cached_data = redis.get(cache_key)
+                if cached_data:
+                    logger.info("tmdb_search_cache_hit", key=cache_key)
+                    items = json.loads(cached_data)
+                    return SearchResponse(query=q, results=[SearchResult(**item) for item in items][:limit])
+                logger.info("tmdb_search_cache_miss", key=cache_key)
+        except Exception as e:
+            logger.error("redis_cache_error", error=str(e))
+
     if settings.tmdb_api_key:
         try:
             async with httpx.AsyncClient() as client:
@@ -198,6 +218,11 @@ async def semantic_search(
                                 similarity_score=0.9,  # Mocked similarity
                             )
                         )
+                    if redis and cache_key and results:
+                        try:
+                            redis.setex(cache_key, 1800, json.dumps([r.dict() for r in results]))
+                        except Exception as e:
+                            logger.error("redis_cache_set_error", error=str(e))
         except Exception as e:
             logger.error("tmdb_search_failed", error=str(e))
     else:
