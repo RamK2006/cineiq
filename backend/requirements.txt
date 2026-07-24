@@ -9,6 +9,8 @@ upstash-redis>=1.1.0
 # ─── AI / ML / LLM ───
 google-generativeai>=0.8.3
 scikit-surprise>=1.1.4
+qdrant-client>=1.7.0
+sentence-transformers>=2.2.2
 
 # ─── Utils ───
 httpx>=0.26.0

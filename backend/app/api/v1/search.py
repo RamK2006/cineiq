@@ -129,6 +129,38 @@ async def semantic_search(
 
     keywords = q
 
+    if settings.qdrant_url:
+        try:
+            from sentence_transformers import SentenceTransformer
+            from qdrant_client import QdrantClient
+            
+            # 1. Generate embedding for query
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            query_vector = model.encode(q).tolist()
+            
+            # 2. Search Qdrant
+            client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+            if client.collection_exists("movies"):
+                qdrant_results = client.search(
+                    collection_name="movies",
+                    query_vector=query_vector,
+                    limit=limit
+                )
+                
+                if qdrant_results:
+                    logger.info("qdrant_search_success", query=q, hits=len(qdrant_results))
+                    results = [
+                        SearchResult(
+                            id=str(hit.payload.get("movie_id", hit.id)),
+                            title=hit.payload.get("title", "Unknown"),
+                            overview=hit.payload.get("description", ""),
+                            similarity_score=float(hit.score)
+                        ) for hit in qdrant_results
+                    ]
+                    return SearchResponse(query=q, results=results)
+        except Exception as e:
+            logger.warning("qdrant_search_failed_falling_back", error=str(e))
+
     if settings.gemini_api_key:
         keywords = await extract_keywords_with_gemini(q)
 
