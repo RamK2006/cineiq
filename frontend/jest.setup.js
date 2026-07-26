@@ -60,6 +60,34 @@ global.mockNavigation = {
 
 // Mock global fetch for API calls in test environments
 global.fetch = jest.fn().mockImplementation((url) => {
+  if (url.includes('/movies/')) {
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: () => Promise.resolve({
+        id: '1',
+        title: 'Dune: Part Two',
+        tagline: 'Long live the fighters.',
+        overview: 'Paul Atreides unites with Chani and the Fremen while on a warpath of revenge against the conspirators who destroyed his family.',
+        release_date: '2024-02-27',
+        runtime: 166,
+        certification: 'PG-13',
+        genres: ['Science Fiction', 'Adventure'],
+        director: 'Denis Villeneuve',
+        cast: [
+          { id: 1, name: 'Timothée Chalamet', character: 'Paul Atreides' },
+          { id: 2, name: 'Zendaya', character: 'Chani' },
+          { id: 3, name: 'Rebecca Ferguson', character: 'Lady Jessica' },
+          { id: 4, name: 'Javier Bardem', character: 'Stilgar' }
+        ],
+        backdrop_path: 'https://image.tmdb.org/t/p/original/backdrop.jpg',
+        poster_path: 'https://image.tmdb.org/t/p/w500/poster.jpg',
+        vote_average: 8.3,
+        match_score: 0.83
+      })
+    });
+  }
   if (url.includes('/recommend/trending')) {
     return Promise.resolve({
       ok: true,

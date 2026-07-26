@@ -44,3 +44,62 @@ export async function fetchPersonalizedMovies(limit: number = 20): Promise<Recom
 
   return response.json();
 }
+
+export interface MovieCastMember {
+  id: number;
+  name: string;
+  character?: string | null;
+}
+
+export interface MovieDetail {
+  id: string;
+  title: string;
+  tagline: string;
+  overview: string;
+  release_date?: string | null;
+  runtime?: number | null;
+  certification?: string | null;
+  genres: string[];
+  director?: string | null;
+  cast: MovieCastMember[];
+  backdrop_path?: string | null;
+  poster_path?: string | null;
+  vote_average: number;
+  match_score: number;
+}
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export async function fetchMovieDetail(id: string): Promise<MovieDetail> {
+  const response = await fetch(`${API_BASE_URL}/movies/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    let message = `API Error: ${response.status} ${response.statusText}`;
+
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === 'string') {
+        message = body.detail;
+      }
+    } catch {
+      // Keep the status-based fallback message.
+    }
+
+    throw new ApiError(message, response.status);
+  }
+
+  return response.json();
+}
