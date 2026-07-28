@@ -7,6 +7,7 @@ import structlog
 from fastapi import FastAPI, Request
 import httpx
 from fastapi.exceptions import RequestValidationError
+import httpx
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -32,10 +33,14 @@ def get_request_id(request: Request) -> str:
     """Return the request's correlation ID, generating one only as a fallback."""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
+def get_http_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.http_client
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    app.state.http_client = httpx.AsyncClient(timeout=10.0)
     logger.info("cineiq_starting", host=settings.backend_host, port=settings.backend_port)
     try:
         async with engine.begin() as conn:
@@ -83,6 +88,8 @@ async def lifespan(app: FastAPI):
 
     yield
     # Shutdown
+    if hasattr(app.state, "http_client"):
+        await app.state.http_client.aclose()
     logger.info("cineiq_stopped")
     # Close shared httpx client if created
     try:

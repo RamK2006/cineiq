@@ -17,7 +17,11 @@ from app.db.models import Movie
 logger = structlog.get_logger()
 router = APIRouter(prefix="/search", tags=["search"])
 
-GEMINI_CACHE_TTL = 24 * 60 * 60  # 24 hours
+def get_http_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.http_client
+
+# --- Gemini keyword-extraction cache settings ---
+GEMINI_CACHE_TTL = 24 * 60 * 60  # 24 hours in seconds
 GEMINI_CACHE_PREFIX = "gemini:keywords:"
 
 
@@ -241,22 +245,21 @@ async def semantic_search(
 
     if settings.tmdb_api_key:
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    "https://api.themoviedb.org/3/search/movie",
-                    params={
-                        "query": keywords,
-                        "include_adult": "false",
-                        "language": "en-US",
-                        "page": 1,
-                    },
-                    headers={
-                        "Authorization": f"Bearer {settings.tmdb_api_key}",
-                        "accept": "application/json",
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
+            resp = await http_client.get(
+                "https://api.themoviedb.org/3/search/movie",
+                params={
+                    "query": keywords,
+                    "include_adult": "false",
+                    "language": "en-US",
+                    "page": 1,
+                },
+                headers={
+                    "Authorization": f"Bearer {settings.tmdb_api_key}",
+                    "accept": "application/json",
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
                     for item in data.get("results", [])[:limit]:
                         results.append(
                             SearchResult(
