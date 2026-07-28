@@ -53,6 +53,15 @@ async def lifespan(app: FastAPI):
             message="GEMINI_API_KEY is not set; keyword extraction will be skipped.",
         )
 
+    # Load the TMDB movie genre map once so recommendation responses can
+    # resolve genre IDs without making an extra request for every movie.
+    try:
+        from app.api.v1.recommend import initialize_tmdb_genres
+
+        await initialize_tmdb_genres()
+    except Exception as e:
+        logger.error("tmdb_genre_initialization_failed", error=str(e))
+
     yield
     # Shutdown
     logger.info("cineiq_stopped")

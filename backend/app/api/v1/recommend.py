@@ -1,20 +1,25 @@
-from fastapi import APIRouter, Depends, Query
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel
-import structlog
+from fastapi import APIRouter, Depends, Query
+import hashlib
 import httpx
-import random
 import json
 import os
 import pickle
-import hashlib
-from app.db.session import get_redis
+import structlog
 
-from app.core.security import get_current_user
 from app.core.config import settings
+from app.core.security import get_current_user
+from app.db.session import get_redis
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/recommend", tags=["recommendation"])
+
+TMDB_BASE_URL = "https://api.themoviedb.org/3"
+TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
+TMDB_GENRE_CACHE_KEY = "tmdb:genres:movie"
+TMDB_GENRE_CACHE_TTL_SECONDS = 24 * 60 * 60
+
 
 class MovieItem(BaseModel):
     id: str
@@ -24,40 +29,194 @@ class MovieItem(BaseModel):
     genres: List[str]
     match_score: float
 
+
 class RecommendationResponse(BaseModel):
     algorithm: str
     movies: List[MovieItem]
 
-SVD_MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "ml", "models", "svd_v1.pkl")
 
-# Cache model in memory
+SVD_MODEL_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "ml",
+    "models",
+    "svd_v1.pkl",
+)
+
 _svd_model = None
+_tmdb_genre_map: Dict[int, str] = {}
+
+
+def _tmdb_headers() -> Dict[str, str]:
+    return {
+        "Authorization": f"Bearer {settings.tmdb_api_key}",
+        "accept": "application/json",
+    }
+
 
 def _get_svd_model():
     global _svd_model
+
     if _svd_model is not None:
         return _svd_model
-    
+
     if os.path.exists(SVD_MODEL_PATH):
         try:
-            with open(SVD_MODEL_PATH, "rb") as f:
-                _svd_model = pickle.load(f)
+            with open(SVD_MODEL_PATH, "rb") as file:
+                _svd_model = pickle.load(file)
             return _svd_model
-        except Exception as e:
-            logger.error("failed_to_load_svd_model", error=str(e))
+        except Exception as error:
+            logger.error(
+                "failed_to_load_svd_model",
+                error=str(error),
+            )
+
     return None
 
+
 def _hash_user_id_to_ml_id(user_id: str) -> str:
-    """Map string user ID to a MovieLens user ID (1-943) for demo purposes."""
-    hashed = int(hashlib.md5(user_id.encode()).hexdigest(), 16)
+    """Map a string user ID to a stable MovieLens user ID."""
+    hashed = int(
+        hashlib.md5(user_id.encode()).hexdigest(),
+        16,
+    )
     return str((hashed % 943) + 1)
 
-async def _fetch_tmdb_movies(endpoint: str, limit: int = 20, page: int = 1) -> List[MovieItem]:
+
+def _calculate_match_score(
+    vote_average: float,
+    popularity: float,
+) -> float:
+    """Return a deterministic 0-1 score from TMDB quality and popularity.
+
+    Vote average contributes 80% of the score. Popularity contributes
+    20% through a bounded saturation curve so extreme popularity values
+    cannot dominate movie quality.
+    """
+    normalized_vote = min(
+        max(float(vote_average or 0.0) / 10.0, 0.0),
+        1.0,
+    )
+    safe_popularity = max(float(popularity or 0.0), 0.0)
+    normalized_popularity = (
+        safe_popularity / (safe_popularity + 1000.0)
+        if safe_popularity
+        else 0.0
+    )
+
+    return round(
+        (normalized_vote * 0.8)
+        + (normalized_popularity * 0.2),
+        2,
+    )
+
+
+def _resolve_genres(genre_ids: List[int]) -> List[str]:
+    """Resolve TMDB genre IDs using the startup-loaded genre cache."""
+    genres = [
+        _tmdb_genre_map[genre_id]
+        for genre_id in genre_ids
+        if genre_id in _tmdb_genre_map
+    ]
+    return genres or ["Unknown"]
+
+
+async def initialize_tmdb_genres() -> Dict[int, str]:
+    """Load and cache the TMDB movie genre mapping.
+
+    The mapping is cached in process memory and, when Redis is configured,
+    persisted for 24 hours to avoid unnecessary TMDB requests after restarts.
+    """
+    global _tmdb_genre_map
+
+    if _tmdb_genre_map:
+        return _tmdb_genre_map
+
+    if not settings.tmdb_api_key:
+        logger.warning(
+            "tmdb_genres_not_loaded",
+            reason="TMDB API key is not configured",
+        )
+        return {}
+
+    redis = get_redis()
+
+    if redis:
+        try:
+            cached_data = redis.get(TMDB_GENRE_CACHE_KEY)
+            if cached_data:
+                raw_mapping = json.loads(cached_data)
+                _tmdb_genre_map = {
+                    int(genre_id): name
+                    for genre_id, name in raw_mapping.items()
+                }
+                logger.info(
+                    "tmdb_genre_cache_hit",
+                    genres=len(_tmdb_genre_map),
+                )
+                return _tmdb_genre_map
+        except Exception as error:
+            logger.error(
+                "tmdb_genre_cache_read_failed",
+                error=str(error),
+            )
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{TMDB_BASE_URL}/genre/movie/list",
+                params={"language": "en-US"},
+                headers=_tmdb_headers(),
+            )
+            response.raise_for_status()
+
+        _tmdb_genre_map = {
+            int(genre["id"]): str(genre["name"])
+            for genre in response.json().get("genres", [])
+            if genre.get("id") is not None and genre.get("name")
+        }
+
+        if redis and _tmdb_genre_map:
+            try:
+                redis.setex(
+                    TMDB_GENRE_CACHE_KEY,
+                    TMDB_GENRE_CACHE_TTL_SECONDS,
+                    json.dumps(_tmdb_genre_map),
+                )
+            except Exception as error:
+                logger.error(
+                    "tmdb_genre_cache_write_failed",
+                    error=str(error),
+                )
+
+        logger.info(
+            "tmdb_genres_loaded",
+            genres=len(_tmdb_genre_map),
+        )
+    except Exception as error:
+        logger.error(
+            "tmdb_genre_fetch_failed",
+            error=str(error),
+        )
+
+    return _tmdb_genre_map
+
+
+async def _fetch_tmdb_movies(
+    endpoint: str,
+    limit: int = 20,
+    page: int = 1,
+) -> List[MovieItem]:
     if not settings.tmdb_api_key:
         return []
 
+    if not _tmdb_genre_map:
+        await initialize_tmdb_genres()
+
     redis = get_redis()
     cache_key = None
+
     if endpoint == "movie/popular":
         cache_key = f"tmdb:popular:page:{page}"
     elif endpoint == "trending/movie/day":
@@ -67,78 +226,139 @@ async def _fetch_tmdb_movies(endpoint: str, limit: int = 20, page: int = 1) -> L
         try:
             cached_data = redis.get(cache_key)
             if cached_data:
-                logger.info("tmdb_cache_hit", key=cache_key)
+                logger.info(
+                    "tmdb_cache_hit",
+                    key=cache_key,
+                )
                 items = json.loads(cached_data)
-                return [MovieItem(**item) for item in items][:limit]
-            logger.info("tmdb_cache_miss", key=cache_key)
-        except Exception as e:
-            logger.error("redis_cache_error", error=str(e))
-        
+                return [
+                    MovieItem(**item)
+                    for item in items
+                ][:limit]
+            logger.info(
+                "tmdb_cache_miss",
+                key=cache_key,
+            )
+        except Exception as error:
+            logger.error(
+                "redis_cache_error",
+                error=str(error),
+            )
+
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"https://api.themoviedb.org/3/{endpoint}",
-                params={"language": "en-US", "page": page},
-                headers={
-                    "Authorization": f"Bearer {settings.tmdb_api_key}",
-                    "accept": "application/json"
-                }
+            response = await client.get(
+                f"{TMDB_BASE_URL}/{endpoint}",
+                params={
+                    "language": "en-US",
+                    "page": page,
+                },
+                headers=_tmdb_headers(),
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                movies = []
-                for item in data.get("results", [])[:limit]:
-                    movies.append(
-                        MovieItem(
-                            id=str(item.get("id")),
-                            title=item.get("title", ""),
-                            poster_path=f"https://image.tmdb.org/t/p/w500{item.get('poster_path')}" if item.get("poster_path") else None,
-                            vote_average=item.get("vote_average", 0.0),
-                            genres=["Movie"], # Would need genre mapping
-                            match_score=round(random.uniform(0.7, 0.98), 2)
-                        )
-                    )
-                if redis and cache_key:
-                    try:
-                        redis.setex(cache_key, 3600, json.dumps([m.dict() for m in movies]))
-                    except Exception as e:
-                        logger.error("redis_cache_set_error", error=str(e))
-                return movies
-    except Exception as e:
-        logger.error("tmdb_fetch_failed", endpoint=endpoint, error=str(e))
-    return []
+            response.raise_for_status()
 
-async def _fetch_tmdb_movie_by_id(movie_id: str, match_score: float) -> Optional[MovieItem]:
-    """Fetch single movie by TMDB ID."""
+        movies = [
+            MovieItem(
+                id=str(item.get("id")),
+                title=item.get("title", ""),
+                poster_path=(
+                    f"{TMDB_IMAGE_BASE_URL}{item.get('poster_path')}"
+                    if item.get("poster_path")
+                    else None
+                ),
+                vote_average=float(
+                    item.get("vote_average", 0.0) or 0.0,
+                ),
+                genres=_resolve_genres(
+                    item.get("genre_ids", []),
+                ),
+                match_score=_calculate_match_score(
+                    item.get("vote_average", 0.0),
+                    item.get("popularity", 0.0),
+                ),
+            )
+            for item in response.json().get("results", [])[:limit]
+        ]
+
+        if redis and cache_key:
+            try:
+                redis.setex(
+                    cache_key,
+                    3600,
+                    json.dumps(
+                        [
+                            movie.model_dump()
+                            for movie in movies
+                        ],
+                    ),
+                )
+            except Exception as error:
+                logger.error(
+                    "redis_cache_set_error",
+                    error=str(error),
+                )
+
+        return movies
+    except Exception as error:
+        logger.error(
+            "tmdb_fetch_failed",
+            endpoint=endpoint,
+            error=str(error),
+        )
+        return []
+
+
+async def _fetch_tmdb_movie_by_id(
+    movie_id: str,
+    match_score: float,
+) -> Optional[MovieItem]:
+    """Fetch a single movie by TMDB ID."""
     if not settings.tmdb_api_key:
         return None
-        
+
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"https://api.themoviedb.org/3/movie/{movie_id}",
+            response = await client.get(
+                f"{TMDB_BASE_URL}/movie/{movie_id}",
                 params={"language": "en-US"},
-                headers={
-                    "Authorization": f"Bearer {settings.tmdb_api_key}",
-                    "accept": "application/json"
-                }
+                headers=_tmdb_headers(),
             )
-            if resp.status_code == 200:
-                item = resp.json()
-                genres = [g.get("name") for g in item.get("genres", [])] if item.get("genres") else ["Movie"]
-                return MovieItem(
-                    id=str(item.get("id")),
-                    title=item.get("title", ""),
-                    poster_path=f"https://image.tmdb.org/t/p/w500{item.get('poster_path')}" if item.get("poster_path") else None,
-                    vote_average=item.get("vote_average", 0.0),
-                    genres=genres,
-                    match_score=round(match_score, 2)
-                )
-    except Exception as e:
-        logger.error("tmdb_fetch_by_id_failed", movie_id=movie_id, error=str(e))
-    return None
+            response.raise_for_status()
 
-@router.get("/personalized", response_model=RecommendationResponse)
+        item = response.json()
+        genres = [
+            genre.get("name")
+            for genre in item.get("genres", [])
+            if genre.get("name")
+        ]
+
+        return MovieItem(
+            id=str(item.get("id")),
+            title=item.get("title", ""),
+            poster_path=(
+                f"{TMDB_IMAGE_BASE_URL}{item.get('poster_path')}"
+                if item.get("poster_path")
+                else None
+            ),
+            vote_average=float(
+                item.get("vote_average", 0.0) or 0.0,
+            ),
+            genres=genres or ["Unknown"],
+            match_score=round(match_score, 2),
+        )
+    except Exception as error:
+        logger.error(
+            "tmdb_fetch_by_id_failed",
+            movie_id=movie_id,
+            error=str(error),
+        )
+        return None
+
+
+@router.get(
+    "/personalized",
+    response_model=RecommendationResponse,
+)
 async def get_personalized_recommendations(
     user_id: str = Depends(get_current_user),
     limit: int = Query(20, le=100),
@@ -146,99 +366,138 @@ async def get_personalized_recommendations(
         default=1,
         ge=1,
         le=1000,
-        description="TMDB page number"
-    )
+        description="TMDB page number",
+    ),
 ):
-    """Get personalized recommendations using SVD with TMDB Popular fallback."""
-    logger.info("fetch_personalized_recs", user_id=user_id, limit=limit, page=page)
-    
+    """Get personalized recommendations using SVD with TMDB fallback."""
+    logger.info(
+        "fetch_personalized_recs",
+        user_id=user_id,
+        limit=limit,
+        page=page,
+    )
+
     model = _get_svd_model()
-    
+
     if model is not None:
         try:
-            # Map App string ID to MovieLens integer ID (1-943)
             ml_uid = _hash_user_id_to_ml_id(user_id)
-            
-            # Predict ratings for all items in the trainset
-            # ml-100k has 1682 items
             predictions = []
-            for iid in model.trainset.all_items():
-                raw_iid = model.trainset.to_raw_iid(iid)
-                # Ensure it's a valid integer ID to query TMDB 
-                # (since MovieLens IDs 1-1682 map to valid TMDB movies purely by coincidence, good enough for demo)
-                if raw_iid.isdigit():
-                    pred = model.predict(ml_uid, raw_iid)
-                    predictions.append((raw_iid, pred.est))
-            
-            # Sort by highest predicted rating
-            predictions.sort(key=lambda x: x[1], reverse=True)
-            
-            # Fetch TMDB data for top predictions
+
+            for item_id in model.trainset.all_items():
+                raw_item_id = model.trainset.to_raw_iid(
+                    item_id,
+                )
+                if raw_item_id.isdigit():
+                    prediction = model.predict(
+                        ml_uid,
+                        raw_item_id,
+                    )
+                    predictions.append(
+                        (
+                            raw_item_id,
+                            prediction.est,
+                        ),
+                    )
+
+            predictions.sort(
+                key=lambda prediction: prediction[1],
+                reverse=True,
+            )
+
             movies = []
-            # We fetch more than limit because some TMDB requests might fail (404)
-            for iid, est_rating in predictions[:limit*3]:
+
+            for item_id, estimated_rating in predictions[
+                : limit * 3
+            ]:
                 if len(movies) >= limit:
                     break
-                # Normalize est rating (1-5) to match score (0-1)
-                match_score = min(est_rating / 5.0, 1.0)
-                movie = await _fetch_tmdb_movie_by_id(iid, match_score)
+
+                match_score = min(
+                    estimated_rating / 5.0,
+                    1.0,
+                )
+                movie = await _fetch_tmdb_movie_by_id(
+                    item_id,
+                    match_score,
+                )
                 if movie:
                     movies.append(movie)
-            
-            if movies:
-                return RecommendationResponse(algorithm="svd_collaborative_filtering", movies=movies)
-                
-        except Exception as e:
-            logger.error("svd_prediction_failed", error=str(e))
 
-    # Cold-start / Fallback to TMDB popular
+            if movies:
+                return RecommendationResponse(
+                    algorithm="svd_collaborative_filtering",
+                    movies=movies,
+                )
+        except Exception as error:
+            logger.error(
+                "svd_prediction_failed",
+                error=str(error),
+            )
+
     logger.info("using_cold_start_fallback")
-    movies = await _fetch_tmdb_movies("movie/popular", limit, page)
-    
+    movies = await _fetch_tmdb_movies(
+        "movie/popular",
+        limit,
+        page,
+    )
+
     if not movies:
-        # Return mock data if TMDB fails or key not set
         movies = [
             MovieItem(
-                id="1", 
-                title="Inception", 
-                vote_average=8.8, 
+                id="1",
+                title="Inception",
+                vote_average=8.8,
                 genres=["Action", "Sci-Fi"],
-                match_score=0.95
+                match_score=0.95,
             ),
             MovieItem(
-                id="2", 
-                title="Interstellar", 
-                vote_average=8.6, 
+                id="2",
+                title="Interstellar",
+                vote_average=8.6,
                 genres=["Adventure", "Sci-Fi"],
-                match_score=0.92
-            )
+                match_score=0.92,
+            ),
         ]
-        
-    # Keep the original algorithm name for fallback
-    return RecommendationResponse(algorithm="hybrid_ncf_svd_mock", movies=movies)
 
-@router.get("/trending", response_model=RecommendationResponse)
+    return RecommendationResponse(
+        algorithm="hybrid_ncf_svd_mock",
+        movies=movies,
+    )
+
+
+@router.get(
+    "/trending",
+    response_model=RecommendationResponse,
+)
 async def get_trending_movies(
     limit: int = Query(20, le=100),
     page: int = Query(
         default=1,
         ge=1,
         le=1000,
-        description="TMDB page number"
-    )
+        description="TMDB page number",
+    ),
 ):
     """Get globally trending movies."""
-    movies = await _fetch_tmdb_movies("trending/movie/day", limit, page)
-    
+    movies = await _fetch_tmdb_movies(
+        "trending/movie/day",
+        limit,
+        page,
+    )
+
     if not movies:
         movies = [
             MovieItem(
-                id="3", 
-                title="Dune: Part Two", 
-                vote_average=8.3, 
+                id="3",
+                title="Dune: Part Two",
+                vote_average=8.3,
                 genres=["Sci-Fi", "Adventure"],
-                match_score=0.88
-            )
+                match_score=0.88,
+            ),
         ]
-        
-    return RecommendationResponse(algorithm="trending", movies=movies)
+
+    return RecommendationResponse(
+        algorithm="trending",
+        movies=movies,
+    )
