@@ -1,10 +1,25 @@
 import type { Metadata } from 'next';
+import { Outfit, Inter } from 'next/font/google';
 import './globals.css';
 import Navigation from '@/components/Navigation';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { ClerkProvider } from '@clerk/nextjs';
 import CustomCursor from '@/components/CustomCursor';
 import ScrollToTopButton from '@/components/ScrollToTopButton';
+
+const outfit = Outfit({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700', '800'],
+  variable: '--font-display',
+  display: 'swap',
+});
+
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-body',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'CINEIQ | Discover Movies Together',
@@ -20,7 +35,7 @@ export default function RootLayout({
 
   return (
     <ClerkProvider publishableKey={publishableKey}>
-      <html lang="en">
+      <html lang="en" className={`${outfit.variable} ${inter.variable}`}>
         <head>
           <script
             dangerouslySetInnerHTML={{

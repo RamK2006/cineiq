@@ -3,8 +3,6 @@
    Dark theme · Cinematic Glassmorphism · Premium Typography
    ═══════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
-
 :root {
   /* Cinematic Dark Theme */
   --bg-base: #05050A; /* Extremely dark, almost black */
@@ -28,10 +26,6 @@
   --text-primary: #FFFFFF;
   --text-secondary: #A1A1AA;
   --text-muted: #84848F; /* lightened from #71717A: was 4.2:1 contrast (fails AA), now 5.5:1 */
-  /* Typography */
-  --font-display: 'Outfit', sans-serif;
-  --font-body: 'Inter', sans-serif;
-
   /* Layout */
   --radius-sm: 8px;
   --radius-md: 12px;
