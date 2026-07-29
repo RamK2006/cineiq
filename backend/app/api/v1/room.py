@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from typing import Dict, Set, Literal, Optional, Any
 from pydantic import BaseModel, ValidationError
 import json
@@ -8,6 +8,7 @@ import time
 
 from app.core.config import settings
 from app.db.session import get_redis
+from app.core.security import get_current_user
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/room", tags=["watch-party"])
@@ -57,7 +58,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 @router.post("/create")
-async def create_room():
+async def create_room(current_user: str = Depends(get_current_user)):
     """Create a new Watch-Together room."""
     room_id = str(uuid.uuid4())
     # Initialize room state in Redis
@@ -73,14 +74,28 @@ async def create_room():
 @router.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Query(None)):
     """WebSocket endpoint for real-time room sync."""
-    # Basic token validation check (Issue #20 placeholder fallback)
-    if not token and not (not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key):
+    if not token:
         await websocket.close(code=1008, reason="Authentication required")
         return
+
+    from fastapi.security import HTTPAuthorizationCredentials
+    from app.core.security import verify_token
+    from fastapi import HTTPException
     
-    # Mock user for now since full auth is bypassed if no valid token validation exists
-    # Normally we'd decode the JWT token using get_jwks() from security.py here.
-    user_id = token if token else f"user_{str(uuid.uuid4())[:8]}"
+    try:
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        payload = await verify_token(credentials)
+        user_id = payload.get("sub")
+        if not user_id:
+            await websocket.close(code=1008, reason="User ID not found in token")
+            return
+    except HTTPException as e:
+        await websocket.close(code=1008, reason=e.detail)
+        return
+    except Exception as e:
+        logger.error("ws_auth_error", error=str(e))
+        await websocket.close(code=1008, reason="Authentication failed")
+        return
 
     accepted = await manager.connect(room_id, websocket)
     if not accepted:
