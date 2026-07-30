@@ -96,19 +96,12 @@ export async function fetchMovieDetail(id: string): Promise<MovieDetail> {
       'Content-Type': 'application/json',
     },
   });
-
   if (!response.ok) {
     let message = `API Error: ${response.status} ${response.statusText}`;
-
     try {
       const body = await response.json();
-      if (typeof body?.detail === 'string') {
-        message = body.detail;
-      }
-    } catch {
-      // Keep the status-based fallback message.
-    }
-
+      if (typeof body?.detail === 'string') message = body.detail;
+    } catch {}
     throw new ApiError(message, response.status);
   }
 
@@ -126,16 +119,10 @@ export async function fetchProfileStats(token: string): Promise<ProfileStats> {
 
   if (!response.ok) {
     let message = `API Error: ${response.status} ${response.statusText}`;
-
     try {
       const body = await response.json();
-      if (typeof body?.detail === 'string') {
-        message = body.detail;
-      }
-    } catch {
-      // Keep the status-based fallback message.
-    }
-
+      if (typeof body?.detail === 'string') message = body.detail;
+    } catch {}
     throw new ApiError(message, response.status);
   }
 
