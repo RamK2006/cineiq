@@ -1,3 +1,5 @@
+import profile
+
 from fastapi import APIRouter
 from app.api.v1 import movies, recommend, search, room
 
