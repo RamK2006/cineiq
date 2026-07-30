@@ -15,6 +15,17 @@ export interface RecommendationResponse {
   movies: MovieItem[];
 }
 
+export interface GenrePreference {
+  genre: string;
+  score: number;
+}
+
+export interface ProfileStats {
+  movies_watched: number;
+  reviews: number;
+  genre_preferences: GenrePreference[];
+}
+
 export async function fetchTrendingMovies(limit: number = 20): Promise<RecommendationResponse> {
   const response = await fetch(`${API_BASE_URL}/recommend/trending?limit=${limit}`, {
     method: 'GET',
@@ -83,6 +94,33 @@ export async function fetchMovieDetail(id: string): Promise<MovieDetail> {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    let message = `API Error: ${response.status} ${response.statusText}`;
+
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === 'string') {
+        message = body.detail;
+      }
+    } catch {
+      // Keep the status-based fallback message.
+    }
+
+    throw new ApiError(message, response.status);
+  }
+
+  return response.json();
+}
+
+export async function fetchProfileStats(token: string): Promise<ProfileStats> {
+  const response = await fetch(`${API_BASE_URL}/profile/stats`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
   });
 
