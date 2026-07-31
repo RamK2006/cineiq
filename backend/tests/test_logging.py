@@ -5,10 +5,8 @@ with all required context fields, without modifying the application's logging
 configuration.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
+from datetime import datetime
+from unittest.mock import MagicMock
 import structlog
 
 from app.core.logging import log_exception
@@ -36,7 +34,7 @@ def test_log_exception_minimal_fields() -> None:
     log_exception(logger, exc, event="test_event")
 
     logger.error.assert_called_once()
-    _name, args, kwargs = (
+    _name = (
         logger.error.mock_calls[0],
         {},
         {},
