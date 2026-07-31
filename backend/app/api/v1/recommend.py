@@ -4,13 +4,12 @@ from fastapi import APIRouter, Depends, Query
 import hashlib
 import httpx
 import json
-import os
-import pickle
 import structlog
 
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.db.session import get_redis
+from app.ml.manager import model_manager
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/recommend", tags=["recommendation"])
@@ -35,16 +34,6 @@ class RecommendationResponse(BaseModel):
     movies: List[MovieItem]
 
 
-SVD_MODEL_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "..",
-    "ml",
-    "models",
-    "svd_v1.pkl",
-)
-
-_svd_model = None
 _tmdb_genre_map: Dict[int, str] = {}
 
 
@@ -56,23 +45,7 @@ def _tmdb_headers() -> Dict[str, str]:
 
 
 def _get_svd_model():
-    global _svd_model
-
-    if _svd_model is not None:
-        return _svd_model
-
-    if os.path.exists(SVD_MODEL_PATH):
-        try:
-            with open(SVD_MODEL_PATH, "rb") as file:
-                _svd_model = pickle.load(file)
-            return _svd_model
-        except Exception as error:
-            logger.error(
-                "failed_to_load_svd_model",
-                error=str(error),
-            )
-
-    return None
+    return model_manager.get_svd_model()
 
 
 def _hash_user_id_to_ml_id(user_id: str) -> str:
