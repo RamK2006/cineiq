@@ -9,6 +9,7 @@ import pickle
 import structlog
 
 from app.core.config import settings
+from app.core.logging import log_exception
 from app.core.security import get_current_user
 from app.db.session import get_redis
 
@@ -67,9 +68,10 @@ def _get_svd_model():
                 _svd_model = pickle.load(file)
             return _svd_model
         except Exception as error:
-            logger.error(
-                "failed_to_load_svd_model",
-                error=str(error),
+            log_exception(
+                logger,
+                error,
+                event="failed_to_load_svd_model",
             )
 
     return None
@@ -157,9 +159,10 @@ async def initialize_tmdb_genres() -> Dict[int, str]:
                 )
                 return _tmdb_genre_map
         except Exception as error:
-            logger.error(
-                "tmdb_genre_cache_read_failed",
-                error=str(error),
+            log_exception(
+                logger,
+                error,
+                event="tmdb_genre_cache_read_failed",
             )
 
     try:
@@ -185,9 +188,10 @@ async def initialize_tmdb_genres() -> Dict[int, str]:
                     json.dumps(_tmdb_genre_map),
                 )
             except Exception as error:
-                logger.error(
-                    "tmdb_genre_cache_write_failed",
-                    error=str(error),
+                log_exception(
+                    logger,
+                    error,
+                    event="tmdb_genre_cache_write_failed",
                 )
 
         logger.info(
@@ -195,9 +199,10 @@ async def initialize_tmdb_genres() -> Dict[int, str]:
             genres=len(_tmdb_genre_map),
         )
     except Exception as error:
-        logger.error(
-            "tmdb_genre_fetch_failed",
-            error=str(error),
+        log_exception(
+            logger,
+            error,
+            event="tmdb_genre_fetch_failed",
         )
 
     return _tmdb_genre_map
@@ -240,9 +245,10 @@ async def _fetch_tmdb_movies(
                 key=cache_key,
             )
         except Exception as error:
-            logger.error(
-                "redis_cache_error",
-                error=str(error),
+            log_exception(
+                logger,
+                error,
+                event="redis_cache_error",
             )
 
     try:
@@ -293,17 +299,19 @@ async def _fetch_tmdb_movies(
                     ),
                 )
             except Exception as error:
-                logger.error(
-                    "redis_cache_set_error",
-                    error=str(error),
+                log_exception(
+                    logger,
+                    error,
+                    event="redis_cache_set_error",
                 )
 
         return movies
     except Exception as error:
-        logger.error(
-            "tmdb_fetch_failed",
+        log_exception(
+            logger,
+            error,
+            event="tmdb_fetch_failed",
             endpoint=endpoint,
-            error=str(error),
         )
         return []
 
@@ -347,10 +355,11 @@ async def _fetch_tmdb_movie_by_id(
             match_score=round(match_score, 2),
         )
     except Exception as error:
-        logger.error(
-            "tmdb_fetch_by_id_failed",
+        log_exception(
+            logger,
+            error,
+            event="tmdb_fetch_by_id_failed",
             movie_id=movie_id,
-            error=str(error),
         )
         return None
 
@@ -430,9 +439,10 @@ async def get_personalized_recommendations(
                     movies=movies,
                 )
         except Exception as error:
-            logger.error(
-                "svd_prediction_failed",
-                error=str(error),
+            log_exception(
+                logger,
+                error,
+                event="svd_prediction_failed",
             )
 
     logger.info("using_cold_start_fallback")

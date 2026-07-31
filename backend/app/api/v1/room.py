@@ -7,6 +7,7 @@ import uuid
 import time
 
 from app.core.config import settings
+from app.core.logging import log_exception
 from app.db.session import get_redis
 
 logger = structlog.get_logger()
@@ -49,7 +50,7 @@ class ConnectionManager:
                     try:
                         await connection.send_json(message)
                     except Exception as e:
-                        logger.error("ws_broadcast_error", error=str(e))
+                        log_exception(logger, e, event="ws_broadcast_error")
                         stale_connections.append(connection)
             for conn in stale_connections:
                 self.disconnect(room_id, conn)
@@ -67,7 +68,7 @@ async def create_room():
             redis.set(f"room:{room_id}:state", json.dumps({"action": "pause", "progress": 0, "timestamp": time.time()}))
             redis.expire(f"room:{room_id}:state", 86400) # Expire in 24 hours
         except Exception as e:
-            logger.error("redis_set_state_failed", error=str(e))
+            log_exception(logger, e, event="redis_set_state_failed")
     return {"room_id": room_id, "status": "created"}
 
 @router.websocket("/ws/{room_id}")
@@ -95,7 +96,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
             if state_data:
                 await websocket.send_json({"type": "sync", "payload": json.loads(state_data)})
         except Exception as e:
-            logger.error("redis_get_state_failed", error=str(e))
+            log_exception(logger, e, event="redis_get_state_failed")
             
     # Notify others
     await manager.broadcast(room_id, {"type": "user_joined", "user": user_id}, sender=websocket)
@@ -132,7 +133,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                             redis.set(f"room:{room_id}:state", json.dumps(sync_data))
                             redis.expire(f"room:{room_id}:state", 86400)
                         except Exception as e:
-                            logger.error("redis_set_state_failed", error=str(e))
+                            log_exception(logger, e, event="redis_set_state_failed")
             except json.JSONDecodeError:
                 await websocket.send_json({"error": "Invalid JSON format"})
             except ValidationError as e:

@@ -1,6 +1,7 @@
 import structlog
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.core.config import settings
+from app.core.logging import log_exception
 
 logger = structlog.get_logger()
 
@@ -20,7 +21,7 @@ def get_redis():
                     token=settings.upstash_redis_token,
                 )
             except Exception as e:
-                logger.warning("upstash_redis_init_failed", error=str(e))
+                log_exception(logger, e, event="upstash_redis_init_failed")
     return _redis_client
 
 engine = create_async_engine(settings.database_url, echo=False)

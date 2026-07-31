@@ -9,6 +9,7 @@ from app.db.session import get_redis
 from fastapi import APIRouter, Query, Request
 
 from app.core.config import settings
+from app.core.logging import log_exception
 from app.core.rate_limit import limiter
 
 logger = structlog.get_logger()
@@ -70,7 +71,7 @@ async def extract_keywords_with_gemini(query: str) -> str:
                 logger.info("gemini_keywords_cache_hit", cache_key=cache_key)
                 return cached
         except Exception as e:
-            logger.warning("gemini_cache_read_failed", error=str(e))
+            log_exception(logger, e, event="gemini_cache_read_failed")
 
     # 2. Call Gemini (configured once at startup)
     try:
@@ -107,10 +108,10 @@ async def extract_keywords_with_gemini(query: str) -> str:
                     redis.set(cache_key, keywords, ex=GEMINI_CACHE_TTL)
                     logger.info("gemini_keywords_cached", cache_key=cache_key)
                 except Exception as e:
-                    logger.warning("gemini_cache_write_failed", error=str(e))
+                    log_exception(logger, e, event="gemini_cache_write_failed")
             return keywords
     except Exception as e:
-        logger.warning("gemini_keyword_extraction_failed", error=str(e))
+        log_exception(logger, e, event="gemini_keyword_extraction_failed")
 
     # Fallback: use the sanitized query itself as keywords
     return sanitized
@@ -161,7 +162,7 @@ async def semantic_search(
                     ]
                     return SearchResponse(query=q, results=results)
         except Exception as e:
-            logger.warning("qdrant_search_failed_falling_back", error=str(e))
+            log_exception(logger, e, event="qdrant_search_failed_falling_back")
 
     if settings.gemini_api_key:
         keywords = await extract_keywords_with_gemini(q)
@@ -184,7 +185,7 @@ async def semantic_search(
                     return SearchResponse(query=q, results=[SearchResult(**item) for item in items][:limit])
                 logger.info("tmdb_search_cache_miss", key=cache_key)
         except Exception as e:
-            logger.error("redis_cache_error", error=str(e))
+            log_exception(logger, e, event="redis_cache_error")
 
     if settings.tmdb_api_key:
         try:
@@ -222,9 +223,9 @@ async def semantic_search(
                         try:
                             redis.setex(cache_key, 1800, json.dumps([r.dict() for r in results]))
                         except Exception as e:
-                            logger.error("redis_cache_set_error", error=str(e))
+                            log_exception(logger, e, event="redis_cache_set_error")
         except Exception as e:
-            logger.error("tmdb_search_failed", error=str(e))
+            log_exception(logger, e, event="tmdb_search_failed")
     else:
         # Placeholder for actual embedding + Qdrant search if no TMDB api key
         results = [

@@ -6,6 +6,7 @@ import time
 import structlog
 
 from app.core.config import settings
+from app.core.logging import log_exception
 
 logger = structlog.get_logger(__name__)
 
@@ -39,7 +40,7 @@ async def get_jwks():
                 _jwks_cache = {"data": jwks, "expires_at": now + 3600}  # 1 hour
                 return jwks
     except Exception as e:
-        logger.error("jwks_fetch_failed", error=str(e))
+        log_exception(logger, e, event="jwks_fetch_failed")
         return None
 
 
@@ -105,7 +106,7 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
             return payload
 
     except Exception as e:
-        logger.error("jwt_validation_failed", error=str(e), exc_info=True)
+        log_exception(logger, e, event="jwt_validation_failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )

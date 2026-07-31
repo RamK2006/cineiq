@@ -3,7 +3,6 @@ import time
 import uuid
 
 import structlog
-import traceback
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -15,6 +14,7 @@ import structlog.contextvars
 
 from app.api.v1 import api_router
 from app.core.config import settings
+from app.core.logging import log_exception
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from app.core.rate_limit import limiter
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
             genai.configure(api_key=settings.gemini_api_key)
             logger.info("gemini_configured", model=settings.gemini_model)
         except Exception as e:
-            logger.error("gemini_configuration_failed", error=str(e))
+            log_exception(logger, e, event="gemini_configuration_failed")
     else:
         logger.warning(
             "gemini_not_configured",
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 
         await initialize_tmdb_genres()
     except Exception as e:
-        logger.error("tmdb_genre_initialization_failed", error=str(e))
+        log_exception(logger, e, event="tmdb_genre_initialization_failed")
 
     yield
     # Shutdown
@@ -89,7 +89,13 @@ async def log_requests(request: Request, call_next):
     # Generate a unique correlation ID for every incoming request.
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
-    structlog.contextvars.bind_contextvars(request_id=request_id)
+    client_ip = request.client.host if request.client else None
+    structlog.contextvars.bind_contextvars(
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        client_ip=client_ip,
+    )
 
     start = time.time()
     response = await call_next(request)
@@ -102,6 +108,7 @@ async def log_requests(request: Request, call_next):
         status_code=response.status_code,
         latency_ms=latency,
         request_id=request_id,
+        client_ip=client_ip,
     )
 
     # Expose the correlation ID to clients for support/debugging.
@@ -151,12 +158,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     request_id = get_request_id(request)
-    logger.error(
-        "unhandled_exception",
-        path=request.url.path,
-        error=str(exc),
-        traceback=traceback.format_exc(),
-        request_id=request_id,
+    log_exception(
+        logger,
+        exc,
+        event="unhandled_exception",
+        request=request,
     )
     if settings.environment.lower() in ("production", "prod"):
         detail = "Internal server error"
