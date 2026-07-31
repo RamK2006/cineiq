@@ -23,6 +23,27 @@ import {
 
 import { ApiError, fetchMovieDetail, MovieDetail } from '@/lib/api';
 
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import ReviewsSection from './ReviewsSection';
+
+// Mock Data
+const movie = {
+  id: '1',
+  title: 'Dune: Part Two',
+  tagline: 'Long live the fighters.',
+  overview: 'Paul Atreides unites with Chani and the Fremen while on a warpath of revenge against the conspirators who destroyed his family.',
+  year: '2024',
+  runtime: '2h 46m',
+  rating: 'PG-13',
+  genres: ['Sci-Fi', 'Adventure'],
+  director: 'Denis Villeneuve',
+  cast: ['Timothée Chalamet', 'Zendaya', 'Rebecca Ferguson', 'Javier Bardem'],
+  backdrop: 'https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg',
+  dominant_emotion: 'Tense',
+  match: 98
+};
+
+// Emotional arc data (mock)
 const emotionalArc = [
   { time: '0m', tension: 30, awe: 40 },
   { time: '30m', tension: 45, awe: 60 },
@@ -221,6 +242,7 @@ export default function MovieDetailClient() {
           <div className="glass-panel" style={{ padding: 20, marginTop: 20 }}><div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}><CornerDownRight size={20} color="var(--accent-secondary)" /><span style={{ fontWeight: 600 }}>CineIQ Match</span></div><div style={{ fontSize: 24, fontFamily: 'var(--font-display)', color: 'var(--accent-primary)', fontWeight: 700 }}>{Math.round(movie.match_score * 100)}%</div></div>
         </div>
       </div>
+      <ReviewsSection movieId={String(params.id ?? movie.id)} />
     </main>
   );
 }
