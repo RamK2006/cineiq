@@ -24,6 +24,24 @@ import ReviewsSection from './ReviewsSection';
 
 import { ApiError, fetchMovieDetail, MovieDetail } from '@/lib/api';
 
+// Mock Data
+const movie = {
+  id: '1',
+  title: 'Dune: Part Two',
+  tagline: 'Long live the fighters.',
+  overview: 'Paul Atreides unites with Chani and the Fremen while on a warpath of revenge against the conspirators who destroyed his family.',
+  year: '2024',
+  runtime: '2h 46m',
+  rating: 'PG-13',
+  genres: ['Sci-Fi', 'Adventure'],
+  director: 'Denis Villeneuve',
+  cast: ['Timothée Chalamet', 'Zendaya', 'Rebecca Ferguson', 'Javier Bardem'],
+  backdrop: 'https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg',
+  dominant_emotion: 'Tense',
+  match: 98
+};
+
+// Emotional arc data (mock)
 const emotionalArc = [
   { time: '0m', tension: 30, awe: 40 },
   { time: '30m', tension: 45, awe: 60 },
