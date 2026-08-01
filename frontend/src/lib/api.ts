@@ -88,16 +88,56 @@ export async function apiRequest(endpoint: string, options: RequestInit = {}) {
   return response.json();
 }
 
-export async function fetchTrendingMovies(limit: number = 20): Promise<RecommendationResponse> {
-  return apiRequest(`/recommend/trending?limit=${limit}`);
+export interface MovieCastMember {
+  id: number;
+  name: string;
+  character?: string | null;
 }
 
-export async function fetchMovie(movieId: string): Promise<MovieDetail> {
-  return apiRequest(`/movie/${encodeURIComponent(movieId)}`);
+export interface MovieDetail {
+  id: string;
+  title: string;
+  tagline: string;
+  overview: string;
+  release_date?: string | null;
+  runtime?: number | null;
+  certification?: string | null;
+  genres: string[];
+  director?: string | null;
+  cast: MovieCastMember[];
+  backdrop_path?: string | null;
+  poster_path?: string | null;
+  vote_average: number;
+  match_score: number;
 }
 
-export async function fetchPersonalizedMovies(limit: number = 20): Promise<RecommendationResponse> {
-  return apiRequest(`/recommend/personalized?limit=${limit}`);
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export async function fetchMovieDetail(id: string): Promise<MovieDetail> {
+  const response = await fetch(`${API_BASE_URL}/movies/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    let message = `API Error: ${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === 'string') message = body.detail;
+    } catch {}
+    throw new ApiError(message, response.status);
+  }
+
+  return response.json();
 }
 
 export async function fetchProfileStats(token: string): Promise<ProfileStats> {
@@ -110,7 +150,12 @@ export async function fetchProfileStats(token: string): Promise<ProfileStats> {
   });
 
   if (!response.ok) {
-    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+    let message = `API Error: ${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === 'string') message = body.detail;
+    } catch {}
+    throw new ApiError(message, response.status);
   }
 
   return response.json();
