@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 import json
+import os
 
 
 class Settings(BaseSettings):
@@ -12,7 +13,9 @@ class Settings(BaseSettings):
     backend_port: int = 8001
     max_room_participants: int = 10
 
-    # Database
+    # Database — defaults to SQLite for zero-config local development.
+    # Override with a PostgreSQL URL in production via .env:
+    #   DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/cineiq
     database_url: str = ""
 
     # Upstash Redis
@@ -38,12 +41,21 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.0-flash"
 
     # Qdrant Vector DB
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = ""
     qdrant_api_key: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )
+
+    @property
+    def resolved_database_url(self) -> str:
+        """Return the database URL, falling back to a local SQLite file."""
+        if self.database_url and "postgresql" in self.database_url:
+            return self.database_url
+        # Default: SQLite stored in the backend directory
+        db_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return f"sqlite+aiosqlite:///{os.path.join(db_dir, 'cineiq.db')}"
 
     @property
     def cors_origins_list(self) -> List[str]:

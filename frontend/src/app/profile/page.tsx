@@ -7,8 +7,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Your Profile | CineIQ',
     description: 'View your taste profile, movie recommendations, and watch history.',
-    type: 'profile',
-    images: ['/default-og.jpg']
+    type: 'profile'
   }
 };
 

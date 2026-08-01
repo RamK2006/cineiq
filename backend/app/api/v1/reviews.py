@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from math import ceil
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -28,7 +27,7 @@ class ReviewUpdate(BaseModel):
 
 
 class ReviewResponse(BaseModel):
-    id: UUID
+    id: str
     user_id: str
     movie_id: str
     rating: int
@@ -57,14 +56,14 @@ async def _ensure_user_and_movie(
         db.add(User(id=user_id))
 
     if await db.get(Movie, movie_id) is None:
-        db.add(Movie(id=movie_id, title=f"TMDB Movie {movie_id}", genres=[]))
+        raise HTTPException(status_code=404, detail="Movie is not in the catalogue")
 
     await db.flush()
 
 
 def _response(review: Review, current_user_id: str | None) -> ReviewResponse:
     return ReviewResponse(
-        id=review.id,
+        id=str(review.id),
         user_id=review.user_id,
         movie_id=review.movie_id,
         rating=review.rating,
@@ -148,7 +147,7 @@ async def list_reviews(
 
 @router.patch("/reviews/{review_id}", response_model=ReviewResponse)
 async def update_review(
-    review_id: UUID,
+    review_id: str,
     payload: ReviewUpdate,
     user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -172,7 +171,7 @@ async def update_review(
 
 @router.delete("/reviews/{review_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_review(
-    review_id: UUID,
+    review_id: str,
     user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
