@@ -128,3 +128,71 @@ export async function fetchProfileStats(token: string): Promise<ProfileStats> {
 
   return response.json();
 }
+
+
+export interface ReviewItem {
+  id: string;
+  user_id: string;
+  movie_id: string;
+  rating: number;
+  text: string;
+  created_at: string;
+  updated_at: string;
+  is_owner: boolean;
+}
+
+export interface ReviewListResponse {
+  items: ReviewItem[];
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+  average_rating: number;
+  rating_count: number;
+}
+
+async function reviewRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, options);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || `API Error: ${response.status}`);
+  }
+  return response.status === 204 ? (undefined as T) : response.json();
+}
+
+export function fetchMovieReviews(movieId: string, page = 1, limit = 10) {
+  return reviewRequest<ReviewListResponse>(
+    `/movies/${encodeURIComponent(movieId)}/reviews?page=${page}&limit=${limit}`,
+  );
+}
+
+export function createMovieReview(
+  movieId: string,
+  token: string,
+  payload: { rating: number; text: string },
+) {
+  return reviewRequest<ReviewItem>(`/movies/${encodeURIComponent(movieId)}/reviews`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateMovieReview(
+  reviewId: string,
+  token: string,
+  payload: { rating?: number; text?: string },
+) {
+  return reviewRequest<ReviewItem>(`/reviews/${reviewId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteMovieReview(reviewId: string, token: string) {
+  return reviewRequest<void>(`/reviews/${reviewId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}

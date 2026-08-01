@@ -8,6 +8,8 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     JSON,
+    CheckConstraint,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
@@ -26,6 +28,7 @@ class User(Base):
     
     interactions = relationship("Interaction", back_populates="user")
     watch_rooms = relationship("WatchRoom", back_populates="creator")
+    reviews = relationship("Review", back_populates="user", cascade="all, delete-orphan")
 
 
 class Movie(Base):
@@ -48,6 +51,7 @@ class Movie(Base):
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     interactions = relationship("Interaction", back_populates="movie")
+    reviews = relationship("Review", back_populates="movie", cascade="all, delete-orphan")
 
 
 class Interaction(Base):
@@ -75,3 +79,28 @@ class WatchRoom(Base):
     
     creator = relationship("User", back_populates="watch_rooms")
 
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    movie_id = Column(String, ForeignKey("movies.id", ondelete="CASCADE"), nullable=False, index=True)
+    rating = Column(Integer, nullable=False)
+    text = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", back_populates="reviews")
+    movie = relationship("Movie", back_populates="reviews")
+
+    __table_args__ = (
+        CheckConstraint("rating >= 1 AND rating <= 5", name="ck_reviews_rating_range"),
+        UniqueConstraint("user_id", "movie_id", name="uq_reviews_user_movie"),
+    )

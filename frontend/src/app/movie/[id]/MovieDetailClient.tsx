@@ -20,6 +20,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import ReviewsSection from './ReviewsSection';
 
 import { ApiError, fetchMovieDetail, MovieDetail } from '@/lib/api';
 
@@ -221,6 +222,7 @@ export default function MovieDetailClient() {
           <div className="glass-panel" style={{ padding: 20, marginTop: 20 }}><div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}><CornerDownRight size={20} color="var(--accent-secondary)" /><span style={{ fontWeight: 600 }}>CineIQ Match</span></div><div style={{ fontSize: 24, fontFamily: 'var(--font-display)', color: 'var(--accent-primary)', fontWeight: 700 }}>{Math.round(movie.match_score * 100)}%</div></div>
         </div>
       </div>
+      <ReviewsSection movieId={String(params.id ?? movie.id)} />
     </main>
   );
 }
