@@ -11,6 +11,7 @@ const defaultApiUrl =
 
 const nextConfig = {
   reactStrictMode: true,
+  outputFileTracingRoot: __dirname,
   images: {
     unoptimized: process.env.NODE_ENV !== 'production',
     remotePatterns: [

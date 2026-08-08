@@ -49,7 +49,7 @@ export default function ProfileClient() {
         const token = await getToken();
         if (!token) throw new Error('Authentication token unavailable');
         const result = await fetchProfileStats(token);
-        if (!cancelled) setStats(result);
+        if (!cancelled) setStats({ ...EMPTY_STATS, ...result, genre_preferences: result.genre_preferences ?? [] });
       } catch {
         if (!cancelled) {
           setStatsError('We could not load your profile statistics.');
@@ -93,7 +93,8 @@ export default function ProfileClient() {
     );
   }
 
-  const hasTasteProfile = stats.genre_preferences.length > 0;
+  const genrePreferences = stats.genre_preferences ?? [];
+  const hasTasteProfile = genrePreferences.length > 0;
 
   return (
     <main style={{ minHeight: '100vh', padding: '100px 5% 40px' }}>
@@ -154,7 +155,7 @@ export default function ProfileClient() {
               <>
                 <div style={{ height: '300px', width: '100%' }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={stats.genre_preferences}>
+                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={genrePreferences}>
                       <PolarGrid stroke="rgba(255,255,255,0.1)" />
                       <PolarAngleAxis dataKey="genre" tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} />
                       <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
@@ -163,7 +164,7 @@ export default function ProfileClient() {
                   </ResponsiveContainer>
                 </div>
                 <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '14px', marginTop: '16px' }}>
-                  Your strongest movie preference is {stats.genre_preferences[0].genre}.
+                  Your strongest movie preference is {genrePreferences[0].genre}.
                 </p>
               </>
             ) : (

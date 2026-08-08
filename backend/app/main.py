@@ -18,9 +18,13 @@ from app.core.logging import log_exception
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from app.core.rate_limit import limiter
-logger = structlog.get_logger()
+from app.db.models import Base
+from app.db.session import engine, AsyncSessionLocal
+from app.services.sync import seed_movies_if_empty
 
 HEALTH_ERROR_PREFIX = "error:"
+
+logger = structlog.get_logger()
 
 
 def get_request_id(request: Request) -> str:
@@ -32,12 +36,18 @@ def get_request_id(request: Request) -> str:
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("cineiq_starting", host=settings.backend_host, port=settings.backend_port)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("database_tables_created")
+        
+        async with AsyncSessionLocal() as db:
+            await seed_movies_if_empty(db)
+    except Exception as e:
+        logger.error("database_startup_failed", error=str(e))
+        
     if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
-        if settings.environment == "development":
-            logger.warning(
-                "auth_bypass_active",
-                message="Clerk secret key is missing or default. Authentication bypass is active in development mode."
-            )
+        logger.warning("clerk_not_configured", message="Protected endpoints will return 503 until Clerk is configured.")
 
     # --- Configure Google Gemini ONCE at startup (not per request) ---
     if settings.gemini_api_key:
@@ -65,6 +75,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("cineiq_stopped")
+    await engine.dispose()
 
 app = FastAPI(
     title="CINEIQ API",
@@ -73,8 +84,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
+# Rate limiting — the SlowAPI middleware may not be compatible with all
+# FastAPI versions.  Wrap registration so the app still starts if it fails.
+try:
+    app.state.limiter = limiter
+    app.add_middleware(SlowAPIMiddleware)
+except Exception as _rl_err:
+    import logging as _log
+    _log.getLogger("uvicorn").warning(f"SlowAPI middleware disabled: {_rl_err}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -142,13 +159,13 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         "http_exception",
         path=request.url.path,
         status_code=exc.status_code,
-        detail=exc.detail,
+        detail=getattr(exc, "detail", str(exc)),
         request_id=request_id,
     )
     return JSONResponse(
         status_code=exc.status_code,
         content={
-            "detail": exc.detail,
+            "detail": getattr(exc, "detail", str(exc)),
             "error_code": "HTTP_ERROR",
             "request_id": request_id,
         },
@@ -177,25 +194,24 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
-@app.exception_handler(RateLimitExceeded)
-async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    request_id = get_request_id(request)
-    response = JSONResponse(
-        status_code=429,
-        content={
-            "detail": "Too many requests. Please try again later.",
-            "error_code": "RATE_LIMIT_EXCEEDED",
-            "request_id": request_id,
-        },
-    )
-    if hasattr(request.app.state, "limiter"):
-        response = request.app.state.limiter._route_manager.headers_handler(response)
-    return response
+try:
+    @app.exception_handler(RateLimitExceeded)
+    async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        request_id = get_request_id(request)
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": "Too many requests. Please try again later.",
+                "error_code": "RATE_LIMIT_EXCEEDED",
+                "request_id": request_id,
+            },
+        )
+except Exception:
+    pass
 
 app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/health")
-@limiter.exempt
 async def health_check():
     # Single UTC timestamp used for every service in this request.
     last_checked = (
@@ -235,16 +251,13 @@ async def health_check():
         "gemini_api": {"status": gemini_status, "last_checked": last_checked},
     }
 
-    # Define required services that must be configured and operational for "healthy"
     required_services = {"redis", "postgres", "gemini_api"}
 
-    # Determine if any required service is not configured
     any_required_not_configured = any(
         service in required_services and v["status"] == "not_configured"
         for service, v in checks.items()
     )
 
-    # Determine if any required service has an error
     any_required_error = any(
         service in required_services
         and v["status"].startswith(HEALTH_ERROR_PREFIX)
@@ -256,7 +269,6 @@ async def health_check():
     elif any_required_error:
         overall_status = "degraded"
     else:
-        # All required services are ok/configured; check optional services
         any_optional_error = any(
             service not in required_services
             and v["status"].startswith(HEALTH_ERROR_PREFIX)
