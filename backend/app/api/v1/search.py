@@ -21,6 +21,11 @@ GEMINI_CACHE_TTL = 24 * 60 * 60  # 24 hours
 GEMINI_CACHE_PREFIX = "gemini:keywords:"
 
 
+def get_http_client(request: Request) -> httpx.AsyncClient:
+    """FastAPI dependency to retrieve the shared httpx.AsyncClient from app.state."""
+    return request.app.state.http_client
+
+
 def sanitize_query(query: str) -> str:
     cleaned = re.sub(r"[^\w\s\-'\"]", "", query)
     return cleaned[:200].strip()
@@ -102,7 +107,8 @@ async def semantic_search(
     year_from: Optional[int] = Query(None, description="Release year from"),
     year_to: Optional[int] = Query(None, description="Release year to"),
     sort_by: Optional[str] = Query("popularity", description="Sort by: popularity | rating | release_date"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    client: httpx.AsyncClient = Depends(get_http_client),
 ):
     """
     Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.

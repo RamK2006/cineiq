@@ -5,6 +5,7 @@ import uuid
 import structlog
 
 from fastapi import FastAPI, Request
+import httpx
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -63,18 +64,34 @@ async def lifespan(app: FastAPI):
             message="GEMINI_API_KEY is not set; keyword extraction will be skipped.",
         )
 
+    # Create a shared httpx.AsyncClient for reuse across requests
+    try:
+        app.state.http_client = httpx.AsyncClient(timeout=10.0)
+        logger.info("shared_httpx_client_created", timeout_seconds=10)
+    except Exception as e:
+        logger.error("httpx_client_creation_failed", error=str(e))
+        app.state.http_client = None
+
     # Load the TMDB movie genre map once so recommendation responses can
     # resolve genre IDs without making an extra request for every movie.
     try:
         from app.api.v1.recommend import initialize_tmdb_genres
 
-        await initialize_tmdb_genres()
+        await initialize_tmdb_genres(app.state.http_client)
     except Exception as e:
         logger.error("tmdb_genre_initialization_failed", error=str(e))
 
     yield
     # Shutdown
     logger.info("cineiq_stopped")
+    # Close shared httpx client if created
+    try:
+        if getattr(app.state, "http_client", None) is not None:
+            await app.state.http_client.aclose()
+            logger.info("shared_httpx_client_closed")
+    except Exception as e:
+        logger.error("httpx_client_close_failed", error=str(e))
+
     await engine.dispose()
 
 app = FastAPI(
