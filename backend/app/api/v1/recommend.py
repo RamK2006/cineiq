@@ -6,7 +6,7 @@ import json
 import os
 import pickle
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,11 @@ TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
 TMDB_GENRE_CACHE_KEY = "tmdb:genres:movie"
 TMDB_GENRE_CACHE_TTL_SECONDS = 24 * 60 * 60
+
+
+def get_http_client(request: Request) -> httpx.AsyncClient:
+    """FastAPI dependency to retrieve the shared httpx.AsyncClient from app.state."""
+    return request.app.state.http_client
 
 
 class MovieItem(BaseModel):
@@ -118,7 +123,8 @@ def _resolve_genres(genre_ids: List[int]) -> List[str]:
     return genres or ["Unknown"]
 
 
-async def initialize_tmdb_genres() -> Dict[int, str]:
+async def initialize_tmdb_genres(client: Optional[httpx.AsyncClient] = None) -> Dict[int, str]:
+    """Load TMDB genres once. If a shared client is provided use it; otherwise fall back to a temporary client."""
     global _tmdb_genre_map
 
     if _tmdb_genre_map:
@@ -154,7 +160,15 @@ async def initialize_tmdb_genres() -> Dict[int, str]:
             )
 
     try:
-        async with httpx.AsyncClient() as client:
+        if client is None:
+            async with httpx.AsyncClient() as temp_client:
+                response = await temp_client.get(
+                    f"{TMDB_BASE_URL}/genre/movie/list",
+                    params={"language": "en-US"},
+                    headers=_tmdb_headers(),
+                )
+                response.raise_for_status()
+        else:
             response = await client.get(
                 f"{TMDB_BASE_URL}/genre/movie/list",
                 params={"language": "en-US"},
@@ -198,12 +212,13 @@ async def _fetch_tmdb_movies(
     endpoint: str,
     limit: int = 20,
     page: int = 1,
+    client: Optional[httpx.AsyncClient] = None,
 ) -> List[MovieItem]:
     if not settings.tmdb_api_key:
         return []
 
     if not _tmdb_genre_map:
-        await initialize_tmdb_genres()
+        await initialize_tmdb_genres(client)
 
     redis = get_redis()
     cache_key = None
@@ -233,7 +248,18 @@ async def _fetch_tmdb_movies(
             )
 
     try:
-        async with httpx.AsyncClient() as client:
+        if client is None:
+            async with httpx.AsyncClient() as temp_client:
+                response = await temp_client.get(
+                    f"{TMDB_BASE_URL}/{endpoint}",
+                    params={
+                        "language": "en-US",
+                        "page": page,
+                    },
+                    headers=_tmdb_headers(),
+                )
+                response.raise_for_status()
+        else:
             response = await client.get(
                 f"{TMDB_BASE_URL}/{endpoint}",
                 params={
@@ -298,12 +324,21 @@ async def _fetch_tmdb_movies(
 async def _fetch_tmdb_movie_by_id(
     movie_id: str,
     match_score: float,
+    client: Optional[httpx.AsyncClient] = None,
 ) -> Optional[MovieItem]:
     if not settings.tmdb_api_key:
         return None
 
     try:
-        async with httpx.AsyncClient() as client:
+        if client is None:
+            async with httpx.AsyncClient() as temp_client:
+                response = await temp_client.get(
+                    f"{TMDB_BASE_URL}/movie/{movie_id}",
+                    params={"language": "en-US"},
+                    headers=_tmdb_headers(),
+                )
+                response.raise_for_status()
+        else:
             response = await client.get(
                 f"{TMDB_BASE_URL}/movie/{movie_id}",
                 params={"language": "en-US"},
@@ -349,7 +384,9 @@ async def get_personalized_recommendations(
     user_id: str = Depends(get_current_user),
     limit: int = Query(20, le=100),
     page: int = Query(default=1, ge=1, le=1000, description="Page number"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    client: httpx.AsyncClient = Depends(get_http_client),
+    request: Request = None,
 ):
     """Get personalized recommendations using DB, SVD, and TMDB fallback."""
     logger.info("fetch_personalized_recs", user_id=user_id, limit=limit, page=page)
@@ -396,7 +433,7 @@ async def get_personalized_recommendations(
                 if len(movies) >= limit:
                     break
                 match_score = min(estimated_rating / 5.0, 1.0)
-                movie = await _fetch_tmdb_movie_by_id(item_id, match_score)
+                movie = await _fetch_tmdb_movie_by_id(item_id, match_score, client=client)
                 if movie:
                     movies.append(movie)
 
@@ -409,7 +446,7 @@ async def get_personalized_recommendations(
             logger.error("svd_prediction_failed", error=str(error))
 
     # 3. Fall back to the configured TMDB source.
-    movies = await _fetch_tmdb_movies("movie/popular", limit, page)
+    movies = await _fetch_tmdb_movies("movie/popular", limit, page, client=client)
     if not movies:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Recommendations are unavailable: configure TMDB_API_KEY and populate the movie catalogue.")
 
@@ -423,7 +460,8 @@ async def get_personalized_recommendations(
 async def get_trending_movies(
     limit: int = Query(20, le=100),
     page: int = Query(default=1, ge=1, le=1000, description="Page number"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    client: httpx.AsyncClient = Depends(get_http_client),
 ):
     """Get globally trending movies from PostgreSQL DB, TMDB, or Fallback."""
     logger.info("fetch_trending_movies", limit=limit, page=page)
@@ -454,7 +492,7 @@ async def get_trending_movies(
         logger.warning("postgres_trending_fallback", error=str(e))
 
     # 2. Try the configured TMDB API.
-    movies = await _fetch_tmdb_movies("trending/movie/day", limit, page)
+    movies = await _fetch_tmdb_movies("trending/movie/day", limit, page, client=client)
     if not movies:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Trending movies are unavailable: configure TMDB_API_KEY and populate the movie catalogue.")
 
