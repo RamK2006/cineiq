@@ -25,11 +25,12 @@ jobs:
       - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
+          python -m pip install -r backend/requirements.txt
 
       - name: Lint backend
         run: |
-          ruff check backend
+          python -m ruff --version
+          python -m ruff check backend
 
   frontend:
     runs-on: ubuntu-latest
