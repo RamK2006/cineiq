@@ -60,4 +60,6 @@ jobs:
 
       - name: Build
         working-directory: frontend
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
         run: npm run build
