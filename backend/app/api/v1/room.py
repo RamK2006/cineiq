@@ -1,4 +1,5 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
+from fastapi.security import HTTPAuthorizationCredentials
 from typing import Dict, Set, Literal, Optional, Any
 from pydantic import BaseModel, ValidationError
 import json
@@ -7,6 +8,7 @@ import uuid
 import time
 
 from app.core.config import settings
+from app.core.security import verify_token
 from app.db.session import get_redis
 from app.core.security import get_current_user
 
@@ -77,11 +79,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
     if not token:
         await websocket.close(code=1008, reason="Authentication required")
         return
-
-    from fastapi.security import HTTPAuthorizationCredentials
-    from app.core.security import verify_token
-    from fastapi import HTTPException
-    
+    # Authenticate the connecting client using the provided token query parameter.
+    # Use HTTPAuthorizationCredentials to match the token shape expected by verify_token.
     try:
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         payload = await verify_token(credentials)
@@ -89,11 +88,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
         if not user_id:
             await websocket.close(code=1008, reason="User ID not found in token")
             return
-    except HTTPException as e:
-        await websocket.close(code=1008, reason=e.detail)
-        return
     except Exception as e:
-        logger.error("ws_auth_error", error=str(e))
+        # verify_token may raise HTTPException or other errors; close the socket with policy violation
+        logger.warning("ws_auth_failed", error=str(e))
         await websocket.close(code=1008, reason="Authentication failed")
         return
 

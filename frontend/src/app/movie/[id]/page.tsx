@@ -13,8 +13,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     openGraph: {
       title: `Movie ${id} | CineIQ`,
       description: `View details for movie ${id} on CineIQ.`,
-      type: 'video.movie',
-      images: ['/default-og.jpg']
+      type: 'video.movie'
     }
   };
 }

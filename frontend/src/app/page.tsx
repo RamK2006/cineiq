@@ -7,8 +7,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'CineIQ | Discover Movies Together',
     description: 'Discover trending and AI-powered movie recommendations.',
-    type: 'website',
-    images: ['/default-og.jpg']
+    type: 'website'
   }
 };
 

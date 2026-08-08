@@ -45,10 +45,7 @@ async def get_jwks():
 
 async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
-        # If no credentials but we're in dev/test, return dummy user
         if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
-            if settings.environment == "development":
-                return {"sub": "dev_user_123", "role": "user"}
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Authentication service unavailable"
@@ -59,10 +56,7 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 
     token = credentials.credentials
 
-    # If no valid keys, allow bypass for development/testing
     if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
-        if settings.environment == "development":
-            return {"sub": "dev_user_123", "role": "user"}
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication service unavailable"

@@ -5,28 +5,23 @@ from typing import List, Optional
 from pydantic import BaseModel
 import json
 import hashlib
-from app.db.session import get_redis
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import or_
+from sqlalchemy.future import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.rate_limit import limiter
+from app.db.session import get_redis, get_db
+from app.db.models import Movie
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/search", tags=["search"])
 
-# --- Gemini keyword-extraction cache settings ---
-GEMINI_CACHE_TTL = 24 * 60 * 60  # 24 hours in seconds
+GEMINI_CACHE_TTL = 24 * 60 * 60  # 24 hours
 GEMINI_CACHE_PREFIX = "gemini:keywords:"
 
 
 def sanitize_query(query: str) -> str:
-    """
-    Sanitize user input before including it in an LLM prompt.
-
-    - Strips any character that is not a word char, whitespace, hyphen,
-      single quote, or double quote.
-    - Truncates to 200 characters to bound prompt size.
-    """
     cleaned = re.sub(r"[^\w\s\-'\"]", "", query)
     return cleaned[:200].strip()
 
@@ -45,23 +40,11 @@ class SearchResponse(BaseModel):
 
 
 async def extract_keywords_with_gemini(query: str) -> str:
-    """
-    Extract search keywords from a natural-language movie query using Gemini.
-
-    - Gemini is configured ONCE at application startup (see app/main.py lifespan),
-      so this function only creates a model and generates content.
-    - The user query is sanitized and embedded in a structured prompt that
-      resists prompt-injection attempts.
-    - Results are cached in Redis for 24 hours keyed by the sanitized query.
-    """
     sanitized = sanitize_query(query)
     if not sanitized:
-        # Nothing useful to extract; fall back to a truncated raw query.
         return query[:200].strip()
 
     cache_key = f"{GEMINI_CACHE_PREFIX}{sanitized}"
-
-    # 1. Try Redis cache first
     redis = get_redis()
     if redis is not None:
         try:
@@ -72,15 +55,10 @@ async def extract_keywords_with_gemini(query: str) -> str:
         except Exception as e:
             logger.warning("gemini_cache_read_failed", error=str(e))
 
-    # 2. Call Gemini (configured once at startup)
     try:
         import google.generativeai as genai
 
         model = genai.GenerativeModel(settings.gemini_model)
-
-        # Structured prompt: the user query is clearly delimited and flagged
-        # as untrusted DATA (not instructions), so embedded commands cannot
-        # hijack the model's behavior.
         prompt = (
             "You are a keyword extraction assistant for a movie search engine.\n\n"
             "TASK:\n"
@@ -101,7 +79,6 @@ async def extract_keywords_with_gemini(query: str) -> str:
         keywords = (response.text or "").strip()
 
         if keywords:
-            # 3. Store in Redis cache with 24h TTL
             if redis is not None:
                 try:
                     redis.set(cache_key, keywords, ex=GEMINI_CACHE_TTL)
@@ -112,35 +89,33 @@ async def extract_keywords_with_gemini(query: str) -> str:
     except Exception as e:
         logger.warning("gemini_keyword_extraction_failed", error=str(e))
 
-    # Fallback: use the sanitized query itself as keywords
     return sanitized
 
 
 @router.get("/semantic", response_model=SearchResponse)
-@limiter.limit(settings.rate_limit_semantic_search)
 async def semantic_search(
     request: Request,
     q: str = Query(..., description="Natural language search query"),
     limit: int = Query(10, le=50),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Perform semantic search using Google Gemini for intent extraction and TMDB API.
-    Example: 'a dark sci-fi movie about time travel'
+    Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.
     """
     logger.info("semantic_search", query=q, limit=limit)
 
-    keywords = q
+    if not settings.gemini_api_key and not settings.qdrant_url:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Semantic search is unavailable: configure GEMINI_API_KEY or QDRANT_URL.")
 
+    # 1. Try Qdrant vector search if enabled
     if settings.qdrant_url:
         try:
             from sentence_transformers import SentenceTransformer
             from qdrant_client import QdrantClient
-            
-            # 1. Generate embedding for query
+
             model = SentenceTransformer('all-MiniLM-L6-v2')
             query_vector = model.encode(q).tolist()
-            
-            # 2. Search Qdrant
+
             client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
             if client.collection_exists("movies"):
                 qdrant_results = client.search(
@@ -148,7 +123,7 @@ async def semantic_search(
                     query_vector=query_vector,
                     limit=limit
                 )
-                
+
                 if qdrant_results:
                     logger.info("qdrant_search_success", query=q, hits=len(qdrant_results))
                     results = [
@@ -156,6 +131,7 @@ async def semantic_search(
                             id=str(hit.payload.get("movie_id", hit.id)),
                             title=hit.payload.get("title", "Unknown"),
                             overview=hit.payload.get("description", ""),
+                            poster_path=hit.payload.get("poster_path"),
                             similarity_score=float(hit.score)
                         ) for hit in qdrant_results
                     ]
@@ -163,26 +139,60 @@ async def semantic_search(
         except Exception as e:
             logger.warning("qdrant_search_failed_falling_back", error=str(e))
 
+    # 2. Extract keywords using Gemini (if key configured)
+    keywords = q
     if settings.gemini_api_key:
         keywords = await extract_keywords_with_gemini(q)
 
-    # Fallback to TMDB Search
+    # 3. Try PostgreSQL DB search
+    cleaned_q = sanitize_query(keywords)
+    words = [w for w in re.split(r'\s+', cleaned_q) if len(w) > 1]
+    if not words:
+        words = [q[:50]]
+
+    try:
+        conditions = []
+        for w in words:
+            conditions.append(Movie.title.ilike(f"%{w}%"))
+            conditions.append(Movie.overview.ilike(f"%{w}%"))
+
+        stmt = select(Movie).where(or_(*conditions)).order_by(Movie.popularity.desc()).limit(limit)
+        result = await db.execute(stmt)
+        db_movies = result.scalars().all()
+
+        if db_movies:
+            results = []
+            for item in db_movies:
+                match_count = sum(1 for w in words if w.lower() in item.title.lower() or w.lower() in item.overview.lower())
+                base_score = 0.70 + (match_count / max(len(words), 1)) * 0.25
+                similarity_score = round(min(base_score, 0.99), 2)
+
+                results.append(
+                    SearchResult(
+                        id=item.id,
+                        title=item.title,
+                        overview=item.overview,
+                        poster_path=item.poster_path,
+                        similarity_score=similarity_score
+                    )
+                )
+            return SearchResponse(query=q, results=results)
+    except Exception as e:
+        logger.warning("postgres_search_failed_falling_back", error=str(e))
+
+    # 4. Fallback to TMDB Search
     results = []
-    
-    redis = None
+    redis = get_redis()
     cache_key = None
-    if settings.tmdb_api_key:
+    if settings.tmdb_api_key and redis:
         try:
-            redis = get_redis()
-            if redis:
-                query_hash = hashlib.md5(keywords.encode()).hexdigest()
-                cache_key = f"tmdb:search:{query_hash}"
-                cached_data = redis.get(cache_key)
-                if cached_data:
-                    logger.info("tmdb_search_cache_hit", key=cache_key)
-                    items = json.loads(cached_data)
-                    return SearchResponse(query=q, results=[SearchResult(**item) for item in items][:limit])
-                logger.info("tmdb_search_cache_miss", key=cache_key)
+            query_hash = hashlib.md5(keywords.encode()).hexdigest()
+            cache_key = f"tmdb:search:{query_hash}"
+            cached_data = redis.get(cache_key)
+            if cached_data:
+                logger.info("tmdb_search_cache_hit", key=cache_key)
+                items = json.loads(cached_data)
+                return SearchResponse(query=q, results=[SearchResult(**item) for item in items][:limit])
         except Exception as e:
             logger.error("redis_cache_error", error=str(e))
 
@@ -215,25 +225,15 @@ async def semantic_search(
                                     if item.get("poster_path")
                                     else None
                                 ),
-                                similarity_score=0.9,  # Mocked similarity
+                                similarity_score=0.9,
                             )
                         )
                     if redis and cache_key and results:
                         try:
-                            redis.setex(cache_key, 1800, json.dumps([r.dict() for r in results]))
+                            redis.setex(cache_key, 1800, json.dumps([r.model_dump() for r in results]))
                         except Exception as e:
                             logger.error("redis_cache_set_error", error=str(e))
         except Exception as e:
             logger.error("tmdb_search_failed", error=str(e))
-    else:
-        # Placeholder for actual embedding + Qdrant search if no TMDB api key
-        results = [
-            SearchResult(
-                id="12",
-                title="Arrival",
-                overview="A linguist works with the military to communicate with alien lifeforms.",
-                similarity_score=0.89,
-            )
-        ]
 
     return SearchResponse(query=q, results=results)

@@ -4,7 +4,12 @@ import Navigation from '../components/Navigation';
 
 // Define TS interface for custom global mock navigation
 interface GlobalMockNavigation {
+  push: jest.Mock;
+  replace: jest.Mock;
+  prefetch: jest.Mock;
+  back: jest.Mock;
   setPathname: (path: string) => void;
+  setParams: (params: Record<string, string>) => void;
   resetMocks: () => void;
 }
 
