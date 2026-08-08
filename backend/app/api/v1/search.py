@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 
 from app.core.logging import log_exception
-from app.core.rate_limit import limiter
 
 from app.db.session import get_redis, get_db
 from app.db.models import Movie
@@ -251,8 +250,5 @@ async def semantic_search(
                 similarity_score=0.89,
             )
         ]
-
-            logger.error("tmdb_search_failed", error=str(e))
-
 
     return SearchResponse(query=q, results=results)

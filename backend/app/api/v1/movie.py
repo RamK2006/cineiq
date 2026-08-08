@@ -124,7 +124,6 @@ async def get_movie_details(
                             except ValueError:
                                 pass
                         
-                        import random
                         movie = Movie(
                             id=movie_id,
                             title=data.get("title") or "Untitled",

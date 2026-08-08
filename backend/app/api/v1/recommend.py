@@ -428,11 +428,6 @@ async def get_personalized_recommendations(
         limit,
         page,
     )
-            logger.error("svd_prediction_failed", error=str(error))
-
-
-    # 3. Fall back to the configured TMDB source.
-    movies = await _fetch_tmdb_movies("movie/popular", limit, page)
     if not movies:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Recommendations are unavailable: configure TMDB_API_KEY and populate the movie catalogue.")
 
