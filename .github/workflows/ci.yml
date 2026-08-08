@@ -27,10 +27,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt
 
+      - name: Verify Ruff
+        run: python -m ruff --version
+
       - name: Lint backend
-        run: |
-          python -m ruff --version
-          python -m ruff check backend
+        run: python -m ruff check backend
 
   frontend:
     runs-on: ubuntu-latest
