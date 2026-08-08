@@ -1,4 +1,5 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi.security import HTTPAuthorizationCredentials
 from typing import Dict, Set, Literal, Optional, Any
 from pydantic import BaseModel, ValidationError
 import json
@@ -7,6 +8,7 @@ import uuid
 import time
 
 from app.core.config import settings
+from app.core.security import verify_token
 from app.db.session import get_redis
 
 logger = structlog.get_logger()
@@ -73,14 +75,15 @@ async def create_room():
 @router.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Query(None)):
     """WebSocket endpoint for real-time room sync."""
-    # Basic token validation check (Issue #20 placeholder fallback)
-    if not token and not (not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key):
+    if not token:
         await websocket.close(code=1008, reason="Authentication required")
         return
-    
-    # Mock user for now since full auth is bypassed if no valid token validation exists
-    # Normally we'd decode the JWT token using get_jwks() from security.py here.
-    user_id = token if token else f"user_{str(uuid.uuid4())[:8]}"
+    try:
+        payload = await verify_token(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token))
+        user_id = payload["sub"]
+    except Exception:
+        await websocket.close(code=1008, reason="Invalid authentication token")
+        return
 
     accepted = await manager.connect(room_id, websocket)
     if not accepted:

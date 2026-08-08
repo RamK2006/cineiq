@@ -8,6 +8,7 @@ EXPECTED_TABLES = {
     "movies",
     "users",
     "watch_rooms",
+    "reviews",
 }
 
 

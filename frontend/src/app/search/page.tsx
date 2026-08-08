@@ -7,8 +7,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Search | CineIQ',
     description: 'Find your next favorite movie using AI-powered semantic search.',
-    type: 'website',
-    images: ['/default-og.jpg']
+    type: 'website'
   }
 };
 

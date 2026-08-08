@@ -4,6 +4,7 @@ from app.core.config import settings
 
 logger = structlog.get_logger()
 
+# ─── Redis Setup (Upstash) ───
 _redis_client = None
 _engine = None
 _async_session_local = None
@@ -26,6 +27,7 @@ def get_redis():
     return _redis_client
 
 
+
 def _get_engine():
     global _engine
     if _engine is None:
@@ -46,3 +48,33 @@ async def get_db():
     """Dependency for getting async SQLAlchemy session."""
     async with _get_session_local()() as session:
         yield session
+
+# ─── SQLAlchemy Async Database Setup ───
+_db_url = settings.resolved_database_url
+
+# SQLite requires connect_args to allow multi-threaded access
+_connect_args = {}
+if "sqlite" in _db_url:
+    _connect_args["check_same_thread"] = False
+
+engine = create_async_engine(
+    _db_url,
+    pool_pre_ping=True,
+    echo=False,
+    connect_args=_connect_args,
+)
+
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
+
+async def get_db():
+    """Dependency for getting async SQLAlchemy database session."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+

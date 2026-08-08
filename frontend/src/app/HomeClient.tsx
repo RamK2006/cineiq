@@ -5,34 +5,16 @@ import { motion } from 'framer-motion';
 import { Play, Info } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { fetchTrendingMovies, fetchPersonalizedMovies, MovieItem } from '../lib/api';
+import { fetchTrendingMovies } from '../lib/api';
 import Skeleton from '../components/Skeleton';
 import ErrorState from '../components/ErrorState';
 
 const BLUR_PLACEHOLDER = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyIDMiPjxyZWN0IHdpZHRoPSIyIiBoZWlnaHQ9IjMiIGZpbGw9IiMxYTFhMmUiLz48L3N2Zz4=";
 
-// Hardcoded fallback data to keep site functioning if backend is offline
-const MOCK_HERO_MOVIE = {
-  id: '1',
-  title: 'Dune: Part Two',
-  overview: 'Paul Atreides unites with Chani and the Fremen while on a warpath of revenge against the conspirators who destroyed his family.',
-  backdrop: 'https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg',
-  match: '98% Match'
-};
-
-const MOCK_TRENDING_MOVIES = [
-  { id: '1', title: 'Dune: Part Two', poster: 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2JGqpTd4p.jpg' },
-  { id: '2', title: 'Oppenheimer', poster: 'https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg' },
-  { id: '3', title: 'Poor Things', poster: 'https://image.tmdb.org/t/p/w500/kCGlIMHnOm8PhcbTi03XQ5VGe1T.jpg' },
-  { id: '4', title: 'Interstellar', poster: 'https://image.tmdb.org/t/p/w500/gEU2QlsE1ZEbKU01E8XgK31rGfQ.jpg' },
-  { id: '5', title: 'Inception', poster: 'https://image.tmdb.org/t/p/w500/oYuLEt3zVCKqA3F0B7I2G0kE7Y.jpg' },
-  { id: '6', title: 'Arrival', poster: 'https://image.tmdb.org/t/p/w500/x2FJsf1ElAgr63Y3PNPtJrcmpoe.jpg' }
-];
-
 export default function HomePage() {
   const [typedText, setTypedText] = useState('');
-  const [hero, setHero] = useState<any>(null);
-  const [trending, setTrending] = useState<any[]>([]);
+  const [hero, setHero] = useState<{ id: string; title: string; backdrop?: string | null; match: string } | null>(null);
+  const [trending, setTrending] = useState<{ id: string; title: string; poster?: string | null; match: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -42,50 +24,18 @@ export default function HomePage() {
     setLoading(true);
     setError(false);
     try {
-      // 1. Fetch trending movies from the backend endpoint
       const trendingRes = await fetchTrendingMovies(6);
-      
-      // Determine the hero movie from the first trending result or fallback to default
-      if (trendingRes && trendingRes.movies && trendingRes.movies.length > 0) {
-        const topMovie = trendingRes.movies[0];
-        setHero({
-          id: topMovie.id,
-          title: topMovie.title,
-          overview: 'Discover this trending cinema title recommended for you by CineIQ.',
-          backdrop: topMovie.poster_path || 'https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg',
-          match: `${Math.round(topMovie.match_score * 100)}% Match`
-        });
-      } else {
-        setHero(MOCK_HERO_MOVIE);
-      }
-
-      // 2. Fetch recommendations/personalized movies for the "Top Picks" row
-      try {
-        const personalizedRes = await fetchPersonalizedMovies(6);
-        if (personalizedRes && personalizedRes.movies && personalizedRes.movies.length > 0) {
-          setTrending(
-            personalizedRes.movies.map(m => ({
-              id: m.id,
-              title: m.title,
-              poster: m.poster_path || 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2JGqpTd4p.jpg',
-              match: `${Math.round(m.match_score * 100)}% Match`
-            }))
-          );
-        } else {
-          // Empty or invalid payload fallback
-          setTrending(MOCK_TRENDING_MOVIES.map(m => ({ ...m, match: '98% Match' })));
-        }
-      } catch (err) {
-        // Fallback for auth-failure or backend recommendation issue failures
-        setTrending(MOCK_TRENDING_MOVIES.map(m => ({ ...m, match: '98% Match' })));
-      }
-    } catch (err) {
-      // Direct offline fallback: check if we should show error state or fallback mock data
-      // For this program, we want to try loading local fallback mock data first
-      // Let's set the mock data directly so the user gets a working UI, but flag an error if BOTH fail
-      setHero(MOCK_HERO_MOVIE);
-      setTrending(MOCK_TRENDING_MOVIES.map(m => ({ ...m, match: '98% Match' })));
-      // To satisfy "Error state with retry button if API fails", we only trigger error if fallback logic fails or if specified
+      if (!trendingRes.movies.length) throw new Error('The catalogue has no trending movies.');
+      const movies = trendingRes.movies.map((movie) => ({
+        id: movie.id, title: movie.title, poster: movie.poster_path,
+        match: `${Math.round(movie.match_score * 100)}% Match`,
+      }));
+      setTrending(movies);
+      setHero({ id: movies[0].id, title: movies[0].title, backdrop: movies[0].poster, match: movies[0].match });
+    } catch {
+      setHero(null);
+      setTrending([]);
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -186,16 +136,16 @@ export default function HomePage() {
               </div>
               
               <p style={{ fontSize: '16px', color: '#D4D4D8', marginBottom: '32px', lineHeight: 1.6, textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
-                {hero.overview}
+                Explore this title and see its full details.
               </p>
 
               <div className="hero-buttons" style={{ display: 'flex', gap: '16px' }}>
-                <button className="btn btn-primary" style={{ padding: '14px 32px', fontSize: '16px' }}>
+                <Link href={`/movie/${hero.id}`} className="btn btn-primary" style={{ padding: '14px 32px', fontSize: '16px' }}>
                   <Play size={20} fill="currentColor" /> Play Now
-                </button>
-                <button className="btn btn-glass" style={{ padding: '14px 32px', fontSize: '16px' }}>
+                </Link>
+                <Link href={`/movie/${hero.id}`} className="btn btn-glass" style={{ padding: '14px 32px', fontSize: '16px' }}>
                   <Info size={20} /> More Info
-                </button>
+                </Link>
               </div>
             </motion.div>
           </div>
@@ -217,21 +167,21 @@ export default function HomePage() {
             >
               <Link href={`/movie/${movie.id}`}>
                 <div className="movie-card">
-                  <Image 
-                    src={movie.poster} 
-                    alt={movie.title} 
+                  {movie.poster && <Image 
+                    src={movie.poster}
+                    alt={movie.title}
                     fill
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                     priority={i < 4}
                     placeholder="blur"
                     blurDataURL={BLUR_PLACEHOLDER}
                     className="movie-poster" 
-                  />
+                  />}
                   <div className="movie-overlay">
                     <div className="movie-title">{movie.title}</div>
                     <div className="movie-meta">
                       <span style={{ color: '#22C55E', fontWeight: 600 }}>{movie.match}</span>
-                      <span>2024</span>
+                      <span>TMDB</span>
                     </div>
                   </div>
                 </div>

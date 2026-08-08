@@ -62,6 +62,11 @@ class UpstashRedisStorage(Storage):
     def reset(self) -> int:
         return 0
 
+    @property
+    def base_exceptions(self):
+        """Return the base exception class for this storage backend."""
+        return Exception
+
     def clear(self, name: str) -> None:
         client = self.client
         if client:
