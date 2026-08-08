@@ -4,13 +4,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Play, Pause, Maximize, Volume2, Users, MessageSquare } from 'lucide-react';
 import { useParams } from 'next/navigation';
-import { useUser } from '@clerk/nextjs';
+import { useAuth, useUser } from '@clerk/nextjs';
 
 export default function RoomClient() {
   const params = useParams();
   const roomId = params.id as string;
   
   const { user } = useUser();
+  const { getToken } = useAuth();
   const userName = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? 'You';
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -26,11 +27,12 @@ export default function RoomClient() {
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const userIdRef = useRef<string | null>(null);
 
-  const connectWebSocket = useCallback(() => {
-    // Basic fallback for token 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') || '' : '';
-    // Normally would use env var for WS URL, using hardcoded local as per issue details
-    const wsUrl = `ws://localhost:8001/api/v1/room/ws/${roomId}${token ? `?token=${token}` : ''}`;
+  const connectWebSocket = useCallback(async () => {
+    const token = await getToken();
+    if (!token) { setConnectionStatus('disconnected'); return; }
+    const configuredUrl = process.env.NEXT_PUBLIC_WS_URL;
+    const wsBase = configuredUrl || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/v1`;
+    const wsUrl = `${wsBase.replace(/\/$/, '')}/room/ws/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`;
     
     console.log(`Connecting to WS room: ${roomId}`);
     setConnectionStatus('connecting');
@@ -89,10 +91,10 @@ export default function RoomClient() {
       console.error('WS Error:', error);
       ws.current?.close();
     };
-  }, [roomId]);
+  }, [getToken, roomId]);
 
   useEffect(() => {
-    connectWebSocket();
+    void connectWebSocket();
     return () => {
       if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
       if (ws.current) ws.current.close();
@@ -149,8 +151,9 @@ export default function RoomClient() {
           <span style={{ fontSize: 12, color: 'white', textTransform: 'capitalize' }}>{connectionStatus}</span>
         </div>
 
-        {/* Placeholder Video */}
-        <div style={{ width: '100%', height: '100%', backgroundImage: 'url(https://image.tmdb.org/t/p/original/8rpDcsfLJypbO6vtecsmHLsC88C.jpg)', backgroundSize: 'cover', backgroundPosition: 'center', filter: isPlaying ? 'none' : 'brightness(0.6)' }} />
+        <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: '#111827', color: 'var(--text-secondary)' }}>
+          No licensed playback source is configured for this room.
+        </div>
         
         {/* Play/Pause Overlay animation */}
         {!isPlaying && (

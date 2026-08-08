@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Star, Pencil, Trash2 } from "lucide-react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import {
@@ -50,7 +50,7 @@ export default function ReviewsSection({ movieId }: { movieId: string }) {
 
   const ownReview = useMemo(() => items.find((item) => item.is_owner), [items]);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const result = await fetchMovieReviews(movieId);
@@ -63,9 +63,9 @@ export default function ReviewsSection({ movieId }: { movieId: string }) {
     } finally {
       setLoading(false);
     }
-  }
+  }, [movieId]);
 
-  useEffect(() => { void load(); }, [movieId]);
+  useEffect(() => { void load(); }, [load]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
