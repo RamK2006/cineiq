@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional
 from pydantic import BaseModel
+import asyncio
 import hashlib
 import httpx
 import json
@@ -391,14 +392,20 @@ async def get_personalized_recommendations(
                     predictions.append((raw_item_id, prediction.est))
 
             predictions.sort(key=lambda p: p[1], reverse=True)
-            movies = []
+            
+            tasks = []
             for item_id, estimated_rating in predictions[: limit * 3]:
-                if len(movies) >= limit:
-                    break
                 match_score = min(estimated_rating / 5.0, 1.0)
-                movie = await _fetch_tmdb_movie_by_id(item_id, match_score)
+                tasks.append(_fetch_tmdb_movie_by_id(item_id, match_score))
+                
+            fetched_movies = await asyncio.gather(*tasks)
+            
+            movies = []
+            for movie in fetched_movies:
                 if movie:
                     movies.append(movie)
+                    if len(movies) >= limit:
+                        break
 
             if movies:
                 return RecommendationResponse(
