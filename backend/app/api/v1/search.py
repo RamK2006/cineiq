@@ -260,25 +260,25 @@ async def semantic_search(
             )
             if resp.status_code == 200:
                 data = resp.json()
-                    for item in data.get("results", [])[:limit]:
-                        results.append(
-                            SearchResult(
-                                id=str(item.get("id")),
-                                title=item.get("title", ""),
-                                overview=item.get("overview", ""),
-                                poster_path=(
-                                    f"https://image.tmdb.org/t/p/w500{item.get('poster_path')}"
-                                    if item.get("poster_path")
-                                    else None
-                                ),
-                                similarity_score=0.9,
-                            )
+                for item in data.get("results", [])[:limit]:
+                    results.append(
+                        SearchResult(
+                            id=str(item.get("id")),
+                            title=item.get("title", ""),
+                            overview=item.get("overview", ""),
+                            poster_path=(
+                                f"https://image.tmdb.org/t/p/w500{item.get('poster_path')}"
+                                if item.get("poster_path")
+                                else None
+                            ),
+                            similarity_score=0.9,
                         )
-                    if redis and cache_key and results:
-                        try:
-                            redis.setex(cache_key, 1800, json.dumps([r.model_dump() for r in results]))
-                        except Exception as e:
-                            logger.error("redis_cache_set_error", error=str(e))
+                    )
+                if redis and cache_key and results:
+                    try:
+                        redis.setex(cache_key, 1800, json.dumps([r.model_dump() for r in results]))
+                    except Exception as e:
+                        logger.error("redis_cache_set_error", error=str(e))
         except Exception as e:
             logger.error("tmdb_search_failed", error=str(e))
 
