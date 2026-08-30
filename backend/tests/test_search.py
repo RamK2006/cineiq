@@ -39,8 +39,18 @@ def test_search_unconfigured_returns_503():
         response = client.get("/api/v1/search/semantic?q=Interstellar")
         assert response.status_code == 503
 
-def test_search_missing_query_fails():
-    """Verify that semantic search without 'q' returns validation error 422."""
-    client = TestClient(app)
-    response = client.get("/api/v1/search/semantic")
-    assert response.status_code == 422
+def test_search_with_only_filters_succeeds():
+    """Verify that semantic search without 'q' but with filters succeeds."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"results": []}
+
+    with patch.object(settings, "gemini_api_key", "test-gemini-key"), \
+         patch.object(settings, "tmdb_api_key", "test-tmdb-key"), \
+         patch("httpx.AsyncClient.get", return_value=mock_response):
+        client = TestClient(app)
+        response = client.get("/api/v1/search/semantic?genres=Action")
+        assert response.status_code == 200
+        data = response.json()
+        assert "query" in data
+        assert "results" in data
