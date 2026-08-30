@@ -6,6 +6,7 @@ import json
 import structlog
 import uuid
 import time
+import html
 
 from app.core.config import settings
 from app.core.security import verify_token
@@ -14,6 +15,9 @@ from app.core.security import get_current_user
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/room", tags=["watch-party"])
+
+# In-memory fallback for chat history
+in_memory_messages: Dict[str, list] = {}
 
 class WSMessage(BaseModel):
     type: Literal["play", "pause", "seek", "chat"]
@@ -108,6 +112,20 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                 await websocket.send_json({"type": "sync", "payload": json.loads(state_data)})
         except Exception as e:
             logger.error("redis_get_state_failed", error=str(e))
+
+    # Send chat history
+    try:
+        history = []
+        if redis:
+            raw_history = redis.lrange(f"room:{room_id}:messages", -50, -1)
+            if raw_history:
+                history = [json.loads(m) for m in raw_history]
+        else:
+            history = in_memory_messages.get(room_id, [])[-50:]
+        
+        await websocket.send_json({"type": "history", "payload": history})
+    except Exception as e:
+        logger.error("chat_history_fetch_failed", error=str(e))
             
     # Notify others
     await manager.broadcast(room_id, {"type": "user_joined", "user": user_id}, sender=websocket)
@@ -124,12 +142,37 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                 # Input validation
                 if msg_type == "chat":
                     text = payload.get("text", "") if isinstance(payload, dict) else str(payload)
+                    text = html.escape(text.strip())
                     if not text or len(text) > 500:
                         continue # invalid message
                     
-                    broadcast_msg = validated_msg.dict()
-                    broadcast_msg["user"] = user_id
-                    await manager.broadcast(room_id, broadcast_msg)
+                    chat_msg = {
+                        "user": user_id,
+                        "text": text,
+                        "timestamp": time.time()
+                    }
+                    
+                    try:
+                        if redis:
+                            key = f"room:{room_id}:messages"
+                            redis.rpush(key, json.dumps(chat_msg))
+                            redis.ltrim(key, -100, -1)
+                            redis.expire(key, 86400)
+                        else:
+                            if room_id not in in_memory_messages:
+                                in_memory_messages[room_id] = []
+                            in_memory_messages[room_id].append(chat_msg)
+                            if len(in_memory_messages[room_id]) > 100:
+                                in_memory_messages[room_id].pop(0)
+                    except Exception as e:
+                        logger.error("redis_save_chat_failed", error=str(e))
+                    
+                    broadcast_msg = {
+                        "type": "chat",
+                        "user": user_id,
+                        "payload": {"text": text, "timestamp": chat_msg["timestamp"]}
+                    }
+                    await manager.broadcast(room_id, broadcast_msg, sender=websocket)
                     
                 elif msg_type in ("play", "pause", "seek"):
                     # Broadcast sync events (play, pause, seek) to others in room

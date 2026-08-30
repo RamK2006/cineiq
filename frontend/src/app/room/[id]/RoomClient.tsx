@@ -16,9 +16,7 @@ export default function RoomClient() {
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [messages, setMessages] = useState<{user: string, text: string}[]>([
-    { user: 'System', text: 'Welcome to the Watch Party!' }
-  ]);
+  const [messages, setMessages] = useState<{user: string, text: string}[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [participants, setParticipants] = useState<string[]>([userName]);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
@@ -56,6 +54,12 @@ export default function RoomClient() {
           if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
         } else if (message.type === 'seek') {
           if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
+        } else if (message.type === 'history') {
+          const historyMessages = message.payload || [];
+          setMessages(historyMessages.map((msg: any) => ({
+            user: msg.user || 'Unknown',
+            text: msg.text || ''
+          })));
         } else if (message.type === 'chat') {
           setMessages(prev => [...prev, { user: message.user || 'Unknown', text: message.payload?.text || '' }]);
         } else if (message.type === 'user_joined') {
