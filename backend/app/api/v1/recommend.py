@@ -1,9 +1,10 @@
 from typing import Dict, List, Optional
 from pydantic import BaseModel
-import asyncio
 import hashlib
 import httpx
 import json
+import os
+import pickle
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.future import select
@@ -13,7 +14,6 @@ from app.core.config import settings
 from app.core.security import get_current_user
 from app.db.session import get_redis, get_db
 from app.db.models import Movie
-from app.ml.manager import model_manager
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/recommend", tags=["recommendation"])
@@ -23,11 +23,8 @@ TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
 TMDB_GENRE_CACHE_KEY = "tmdb:genres:movie"
 TMDB_GENRE_CACHE_TTL_SECONDS = 24 * 60 * 60
 
-
 def get_http_client(request: Request) -> httpx.AsyncClient:
-    """FastAPI dependency to retrieve the shared httpx.AsyncClient from app.state."""
     return request.app.state.http_client
-
 
 class MovieItem(BaseModel):
     id: str
@@ -43,6 +40,16 @@ class RecommendationResponse(BaseModel):
     movies: List[MovieItem]
 
 
+SVD_MODEL_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "ml",
+    "models",
+    "svd_v1.pkl",
+)
+
+_svd_model = None
 _tmdb_genre_map: Dict[int, str] = {}
 
 
@@ -54,7 +61,23 @@ def _tmdb_headers() -> Dict[str, str]:
 
 
 def _get_svd_model():
-    return model_manager.get_svd_model()
+    global _svd_model
+
+    if _svd_model is not None:
+        return _svd_model
+
+    if os.path.exists(SVD_MODEL_PATH):
+        try:
+            with open(SVD_MODEL_PATH, "rb") as file:
+                _svd_model = pickle.load(file)
+            return _svd_model
+        except Exception as error:
+            logger.error(
+                "failed_to_load_svd_model",
+                error=str(error),
+            )
+
+    return None
 
 
 def _hash_user_id_to_ml_id(user_id: str) -> str:
@@ -97,19 +120,11 @@ def _resolve_genres(genre_ids: List[int]) -> List[str]:
     return genres or ["Unknown"]
 
 
-<<<<<<< HEAD
+
+
+
 async def initialize_tmdb_genres(client: Optional[httpx.AsyncClient] = None) -> Dict[int, str]:
     """Load TMDB genres once. If a shared client is provided use it; otherwise fall back to a temporary client."""
-=======
-def get_http_client(request: Request) -> httpx.AsyncClient:
-    return request.app.state.http_client
-
-async def initialize_tmdb_genres(http_client: Optional[httpx.AsyncClient] = None) -> Dict[int, str]:
-    """Load and cache the TMDB movie genre mapping.
-
-    The mapping is cached in process memory and, when Redis is configured,
-    persisted for 24 hours to avoid unnecessary TMDB requests after restarts.
-    """
     global _tmdb_genre_map
 
     if _tmdb_genre_map:
@@ -145,7 +160,6 @@ async def initialize_tmdb_genres(http_client: Optional[httpx.AsyncClient] = None
             )
 
     try:
-<<<<<<< HEAD
         if client is None:
             async with httpx.AsyncClient() as temp_client:
                 response = await temp_client.get(
@@ -156,22 +170,11 @@ async def initialize_tmdb_genres(http_client: Optional[httpx.AsyncClient] = None
                 response.raise_for_status()
         else:
             response = await client.get(
-=======
-        if http_client:
-            response = await http_client.get(
                 f"{TMDB_BASE_URL}/genre/movie/list",
                 params={"language": "en-US"},
                 headers=_tmdb_headers(),
             )
             response.raise_for_status()
-        else:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{TMDB_BASE_URL}/genre/movie/list",
-                    params={"language": "en-US"},
-                    headers=_tmdb_headers(),
-                )
-                response.raise_for_status()
 
         _tmdb_genre_map = {
             int(genre["id"]): str(genre["name"])
@@ -209,19 +212,13 @@ async def _fetch_tmdb_movies(
     endpoint: str,
     limit: int = 20,
     page: int = 1,
-<<<<<<< HEAD
     client: Optional[httpx.AsyncClient] = None,
-=======
-    http_client: Optional[httpx.AsyncClient] = None,
 ) -> List[MovieItem]:
     if not settings.tmdb_api_key:
         return []
 
     if not _tmdb_genre_map:
-<<<<<<< HEAD
         await initialize_tmdb_genres(client)
-=======
-        await initialize_tmdb_genres(http_client)
 
     redis = get_redis()
     cache_key = None
@@ -251,7 +248,6 @@ async def _fetch_tmdb_movies(
             )
 
     try:
-<<<<<<< HEAD
         if client is None:
             async with httpx.AsyncClient() as temp_client:
                 response = await temp_client.get(
@@ -265,9 +261,6 @@ async def _fetch_tmdb_movies(
                 response.raise_for_status()
         else:
             response = await client.get(
-=======
-        if http_client:
-            response = await http_client.get(
                 f"{TMDB_BASE_URL}/{endpoint}",
                 params={
                     "language": "en-US",
@@ -276,17 +269,6 @@ async def _fetch_tmdb_movies(
                 headers=_tmdb_headers(),
             )
             response.raise_for_status()
-        else:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{TMDB_BASE_URL}/{endpoint}",
-                    params={
-                        "language": "en-US",
-                        "page": page,
-                    },
-                    headers=_tmdb_headers(),
-                )
-                response.raise_for_status()
 
         movies = [
             MovieItem(
@@ -342,16 +324,12 @@ async def _fetch_tmdb_movies(
 async def _fetch_tmdb_movie_by_id(
     movie_id: str,
     match_score: float,
-<<<<<<< HEAD
     client: Optional[httpx.AsyncClient] = None,
-=======
-    http_client: Optional[httpx.AsyncClient] = None,
 ) -> Optional[MovieItem]:
     if not settings.tmdb_api_key:
         return None
 
     try:
-<<<<<<< HEAD
         if client is None:
             async with httpx.AsyncClient() as temp_client:
                 response = await temp_client.get(
@@ -362,22 +340,11 @@ async def _fetch_tmdb_movie_by_id(
                 response.raise_for_status()
         else:
             response = await client.get(
-=======
-        if http_client:
-            response = await http_client.get(
                 f"{TMDB_BASE_URL}/movie/{movie_id}",
                 params={"language": "en-US"},
                 headers=_tmdb_headers(),
             )
             response.raise_for_status()
-        else:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{TMDB_BASE_URL}/movie/{movie_id}",
-                    params={"language": "en-US"},
-                    headers=_tmdb_headers(),
-                )
-                response.raise_for_status()
 
         item = response.json()
         genres = [
@@ -416,19 +383,10 @@ async def _fetch_tmdb_movie_by_id(
 async def get_personalized_recommendations(
     user_id: str = Depends(get_current_user),
     limit: int = Query(20, le=100),
-<<<<<<< HEAD
     page: int = Query(default=1, ge=1, le=1000, description="Page number"),
     db: AsyncSession = Depends(get_db),
     client: httpx.AsyncClient = Depends(get_http_client),
     request: Request = None,
-=======
-    page: int = Query(
-        default=1,
-        ge=1,
-        le=1000,
-        description="TMDB page number",
-    ),
-    http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     """Get personalized recommendations using DB, SVD, and TMDB fallback."""
     logger.info("fetch_personalized_recs", user_id=user_id, limit=limit, page=page)
@@ -470,38 +428,14 @@ async def get_personalized_recommendations(
                     predictions.append((raw_item_id, prediction.est))
 
             predictions.sort(key=lambda p: p[1], reverse=True)
-            
-            tasks = []
-            for item_id, estimated_rating in predictions[: limit * 3]:
-                match_score = min(estimated_rating / 5.0, 1.0)
-                tasks.append(_fetch_tmdb_movie_by_id(item_id, match_score, client=client))
-                
-            fetched_movies = await asyncio.gather(*tasks)
-            
             movies = []
-<<<<<<< HEAD
-            for movie in fetched_movies:
-=======
-
-            for item_id, estimated_rating in predictions[
-                : limit * 3
-            ]:
+            for item_id, estimated_rating in predictions[: limit * 3]:
                 if len(movies) >= limit:
                     break
-
-                match_score = min(
-                    estimated_rating / 5.0,
-                    1.0,
-                )
-                movie = await _fetch_tmdb_movie_by_id(
-                    item_id,
-                    match_score,
-                    http_client,
-                )
+                match_score = min(estimated_rating / 5.0, 1.0)
+                movie = await _fetch_tmdb_movie_by_id(item_id, match_score, client=client)
                 if movie:
                     movies.append(movie)
-                    if len(movies) >= limit:
-                        break
 
             if movies:
                 return RecommendationResponse(

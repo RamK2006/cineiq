@@ -17,17 +17,8 @@ from app.db.models import Movie
 logger = structlog.get_logger()
 router = APIRouter(prefix="/search", tags=["search"])
 
-def get_http_client(request: Request) -> httpx.AsyncClient:
-    return request.app.state.http_client
-
-# --- Gemini keyword-extraction cache settings ---
-GEMINI_CACHE_TTL = 24 * 60 * 60  # 24 hours in seconds
+GEMINI_CACHE_TTL = 24 * 60 * 60  # 24 hours
 GEMINI_CACHE_PREFIX = "gemini:keywords:"
-
-
-def get_http_client(request: Request) -> httpx.AsyncClient:
-    """FastAPI dependency to retrieve the shared httpx.AsyncClient from app.state."""
-    return request.app.state.http_client
 
 
 def sanitize_query(query: str) -> str:
@@ -111,8 +102,7 @@ async def semantic_search(
     year_from: Optional[int] = Query(None, description="Release year from"),
     year_to: Optional[int] = Query(None, description="Release year to"),
     sort_by: Optional[str] = Query("popularity", description="Sort by: popularity | rating | release_date"),
-    db: AsyncSession = Depends(get_db),
-    client: httpx.AsyncClient = Depends(get_http_client),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.
@@ -245,40 +235,41 @@ async def semantic_search(
 
     if settings.tmdb_api_key:
         try:
-            resp = await http_client.get(
-                "https://api.themoviedb.org/3/search/movie",
-                params={
-                    "query": keywords,
-                    "include_adult": "false",
-                    "language": "en-US",
-                    "page": 1,
-                },
-                headers={
-                    "Authorization": f"Bearer {settings.tmdb_api_key}",
-                    "accept": "application/json",
-                },
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                for item in data.get("results", [])[:limit]:
-                    results.append(
-                        SearchResult(
-                            id=str(item.get("id")),
-                            title=item.get("title", ""),
-                            overview=item.get("overview", ""),
-                            poster_path=(
-                                f"https://image.tmdb.org/t/p/w500{item.get('poster_path')}"
-                                if item.get("poster_path")
-                                else None
-                            ),
-                            similarity_score=0.9,
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://api.themoviedb.org/3/search/movie",
+                    params={
+                        "query": keywords,
+                        "include_adult": "false",
+                        "language": "en-US",
+                        "page": 1,
+                    },
+                    headers={
+                        "Authorization": f"Bearer {settings.tmdb_api_key}",
+                        "accept": "application/json",
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data.get("results", [])[:limit]:
+                        results.append(
+                            SearchResult(
+                                id=str(item.get("id")),
+                                title=item.get("title", ""),
+                                overview=item.get("overview", ""),
+                                poster_path=(
+                                    f"https://image.tmdb.org/t/p/w500{item.get('poster_path')}"
+                                    if item.get("poster_path")
+                                    else None
+                                ),
+                                similarity_score=0.9,
+                            )
                         )
-                    )
-                if redis and cache_key and results:
-                    try:
-                        redis.setex(cache_key, 1800, json.dumps([r.model_dump() for r in results]))
-                    except Exception as e:
-                        logger.error("redis_cache_set_error", error=str(e))
+                    if redis and cache_key and results:
+                        try:
+                            redis.setex(cache_key, 1800, json.dumps([r.model_dump() for r in results]))
+                        except Exception as e:
+                            logger.error("redis_cache_set_error", error=str(e))
         except Exception as e:
             logger.error("tmdb_search_failed", error=str(e))
 
