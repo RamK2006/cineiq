@@ -1,10 +1,9 @@
 from typing import Dict, List, Optional
 from pydantic import BaseModel
+import asyncio
 import hashlib
 import httpx
 import json
-import os
-import pickle
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.future import select
@@ -14,6 +13,7 @@ from app.core.config import settings
 from app.core.security import get_current_user
 from app.db.session import get_redis, get_db
 from app.db.models import Movie
+from app.ml.manager import model_manager
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/recommend", tags=["recommendation"])
@@ -38,16 +38,6 @@ class RecommendationResponse(BaseModel):
     movies: List[MovieItem]
 
 
-SVD_MODEL_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "..",
-    "ml",
-    "models",
-    "svd_v1.pkl",
-)
-
-_svd_model = None
 _tmdb_genre_map: Dict[int, str] = {}
 
 
@@ -59,23 +49,7 @@ def _tmdb_headers() -> Dict[str, str]:
 
 
 def _get_svd_model():
-    global _svd_model
-
-    if _svd_model is not None:
-        return _svd_model
-
-    if os.path.exists(SVD_MODEL_PATH):
-        try:
-            with open(SVD_MODEL_PATH, "rb") as file:
-                _svd_model = pickle.load(file)
-            return _svd_model
-        except Exception as error:
-            logger.error(
-                "failed_to_load_svd_model",
-                error=str(error),
-            )
-
-    return None
+    return model_manager.get_svd_model()
 
 
 def _hash_user_id_to_ml_id(user_id: str) -> str:
@@ -391,14 +365,20 @@ async def get_personalized_recommendations(
                     predictions.append((raw_item_id, prediction.est))
 
             predictions.sort(key=lambda p: p[1], reverse=True)
-            movies = []
+            
+            tasks = []
             for item_id, estimated_rating in predictions[: limit * 3]:
-                if len(movies) >= limit:
-                    break
                 match_score = min(estimated_rating / 5.0, 1.0)
-                movie = await _fetch_tmdb_movie_by_id(item_id, match_score)
+                tasks.append(_fetch_tmdb_movie_by_id(item_id, match_score))
+                
+            fetched_movies = await asyncio.gather(*tasks)
+            
+            movies = []
+            for movie in fetched_movies:
                 if movie:
                     movies.append(movie)
+                    if len(movies) >= limit:
+                        break
 
             if movies:
                 return RecommendationResponse(

@@ -28,3 +28,8 @@ structlog>=24.1.0
 PyJWT>=2.8.0
 cryptography>=42.0.2
 slowapi>=0.1.9
+
+# ─── Testing & Linting ───
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+ruff>=0.5.0

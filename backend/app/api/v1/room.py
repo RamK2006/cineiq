@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from typing import Dict, Set, Literal, Optional, Any
 from pydantic import BaseModel, ValidationError
@@ -10,6 +10,7 @@ import time
 from app.core.config import settings
 from app.core.security import verify_token
 from app.db.session import get_redis
+from app.core.security import get_current_user
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/room", tags=["watch-party"])
@@ -59,7 +60,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 @router.post("/create")
-async def create_room():
+async def create_room(current_user: str = Depends(get_current_user)):
     """Create a new Watch-Together room."""
     room_id = str(uuid.uuid4())
     # Initialize room state in Redis
@@ -78,11 +79,19 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
     if not token:
         await websocket.close(code=1008, reason="Authentication required")
         return
+    # Authenticate the connecting client using the provided token query parameter.
+    # Use HTTPAuthorizationCredentials to match the token shape expected by verify_token.
     try:
-        payload = await verify_token(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token))
-        user_id = payload["sub"]
-    except Exception:
-        await websocket.close(code=1008, reason="Invalid authentication token")
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        payload = await verify_token(credentials)
+        user_id = payload.get("sub")
+        if not user_id:
+            await websocket.close(code=1008, reason="User ID not found in token")
+            return
+    except Exception as e:
+        # verify_token may raise HTTPException or other errors; close the socket with policy violation
+        logger.warning("ws_auth_failed", error=str(e))
+        await websocket.close(code=1008, reason="Authentication failed")
         return
 
     accepted = await manager.connect(room_id, websocket)

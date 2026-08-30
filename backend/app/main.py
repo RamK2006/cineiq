@@ -3,7 +3,6 @@ import time
 import uuid
 
 import structlog
-import traceback
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -20,6 +19,7 @@ from slowapi.errors import RateLimitExceeded
 from app.core.rate_limit import limiter
 from app.db.models import Base
 from app.db.session import engine, AsyncSessionLocal
+from app.core.logging import log_exception
 from app.services.sync import seed_movies_if_empty
 
 HEALTH_ERROR_PREFIX = "error:"
@@ -168,12 +168,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     request_id = get_request_id(request)
-    logger.error(
-        "unhandled_exception",
-        path=request.url.path,
-        error=str(exc),
-        traceback=traceback.format_exc(),
-        request_id=request_id,
+    log_exception(
+        logger,
+        exc,
+        event="unhandled_exception",
+        request=request,
     )
     if settings.environment.lower() in ("production", "prod"):
         detail = "Internal server error"
