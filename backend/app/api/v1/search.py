@@ -6,7 +6,7 @@ from pydantic import BaseModel
 import json
 import hashlib
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import or_
+from sqlalchemy import or_, and_, cast, String, extract
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,20 +95,26 @@ async def extract_keywords_with_gemini(query: str) -> str:
 @router.get("/semantic", response_model=SearchResponse)
 async def semantic_search(
     request: Request,
-    q: str = Query(..., description="Natural language search query"),
+    q: str = Query("", description="Natural language search query"),
     limit: int = Query(10, le=50),
+    genres: Optional[List[str]] = Query(None, description="List of genres to filter by"),
+    min_rating: Optional[float] = Query(None, description="Minimum rating"),
+    year_from: Optional[int] = Query(None, description="Release year from"),
+    year_to: Optional[int] = Query(None, description="Release year to"),
+    sort_by: Optional[str] = Query("popularity", description="Sort by: popularity | rating | release_date"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.
     """
-    logger.info("semantic_search", query=q, limit=limit)
+    logger.info("semantic_search", query=q, limit=limit, genres=genres, min_rating=min_rating, year_from=year_from, year_to=year_to, sort_by=sort_by)
+    has_filters = any([genres, min_rating is not None, year_from is not None, year_to is not None])
 
-    if not settings.gemini_api_key and not settings.qdrant_url:
+    if not settings.gemini_api_key and not settings.qdrant_url and not has_filters:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Semantic search is unavailable: configure GEMINI_API_KEY or QDRANT_URL.")
 
-    # 1. Try Qdrant vector search if enabled
-    if settings.qdrant_url:
+    # 1. Try Qdrant vector search if enabled (skip if filters are applied)
+    if settings.qdrant_url and not has_filters and q:
         try:
             from sentence_transformers import SentenceTransformer
             from qdrant_client import QdrantClient
@@ -147,16 +153,44 @@ async def semantic_search(
     # 3. Try PostgreSQL DB search
     cleaned_q = sanitize_query(keywords)
     words = [w for w in re.split(r'\s+', cleaned_q) if len(w) > 1]
-    if not words:
+    if not words and q:
         words = [q[:50]]
 
     try:
         conditions = []
-        for w in words:
-            conditions.append(Movie.title.ilike(f"%{w}%"))
-            conditions.append(Movie.overview.ilike(f"%{w}%"))
+        if words:
+            word_conditions = []
+            for w in words:
+                word_conditions.append(Movie.title.ilike(f"%{w}%"))
+                word_conditions.append(Movie.overview.ilike(f"%{w}%"))
+            if word_conditions:
+                conditions.append(or_(*word_conditions))
+        
+        if genres:
+            for g in genres:
+                conditions.append(cast(Movie.genres, String).ilike(f'%"{g}"%'))
+                
+        if min_rating is not None:
+            conditions.append(Movie.vote_average >= min_rating)
+            
+        if year_from is not None:
+            conditions.append(extract('year', Movie.release_date) >= year_from)
+            
+        if year_to is not None:
+            conditions.append(extract('year', Movie.release_date) <= year_to)
 
-        stmt = select(Movie).where(or_(*conditions)).order_by(Movie.popularity.desc()).limit(limit)
+        stmt = select(Movie)
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+            
+        if sort_by == 'rating':
+            stmt = stmt.order_by(Movie.vote_average.desc())
+        elif sort_by == 'release_date':
+            stmt = stmt.order_by(Movie.release_date.desc())
+        else:
+            stmt = stmt.order_by(Movie.popularity.desc())
+            
+        stmt = stmt.limit(limit)
         result = await db.execute(stmt)
         db_movies = result.scalars().all()
 
@@ -181,10 +215,13 @@ async def semantic_search(
         logger.warning("postgres_search_failed_falling_back", error=str(e))
 
     # 4. Fallback to TMDB Search
+    if has_filters:
+        return SearchResponse(query=q, results=results if 'results' in locals() else [])
+
     results = []
     redis = get_redis()
     cache_key = None
-    if settings.tmdb_api_key and redis:
+    if settings.tmdb_api_key and redis and q:
         try:
             query_hash = hashlib.md5(keywords.encode()).hexdigest()
             cache_key = f"tmdb:search:{query_hash}"
