@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.security import verify_token
 from app.db.session import get_redis
 from app.core.security import get_current_user
+from app.core.metrics import websocket_connected_clients
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/room", tags=["watch-party"])
@@ -38,12 +39,15 @@ class ConnectionManager:
         if room_id not in self.active_connections:
             self.active_connections[room_id] = set()
         self.active_connections[room_id].add(websocket)
+        websocket_connected_clients.inc()
         logger.info("ws_client_connected", room_id=room_id)
         return True
 
     def disconnect(self, room_id: str, websocket: WebSocket):
         if room_id in self.active_connections:
-            self.active_connections[room_id].discard(websocket)
+            if websocket in self.active_connections[room_id]:
+                self.active_connections[room_id].discard(websocket)
+                websocket_connected_clients.dec()
             if not self.active_connections[room_id]:
                 del self.active_connections[room_id]
         logger.info("ws_client_disconnected", room_id=room_id)

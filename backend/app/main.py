@@ -21,6 +21,9 @@ from app.db.models import Base
 from app.db.session import engine, AsyncSessionLocal
 from app.core.logging import log_exception
 from app.services.sync import seed_movies_if_empty
+from prometheus_fastapi_instrumentator import Instrumentator
+from app.core.metrics import db_query_duration_seconds
+from sqlalchemy import event
 
 HEALTH_ERROR_PREFIX = "error:"
 
@@ -203,6 +206,20 @@ except Exception:
     pass
 
 app.include_router(api_router, prefix="/api/v1")
+
+# Instrument database queries via SQLAlchemy events on the sync engine
+@event.listens_for(engine.sync_engine, "before_cursor_execute")
+def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    context._query_start_time = time.time()
+
+@event.listens_for(engine.sync_engine, "after_cursor_execute")
+def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    if hasattr(context, "_query_start_time"):
+        duration = time.time() - context._query_start_time
+        db_query_duration_seconds.observe(duration)
+
+# Instrument the FastAPI app with Prometheus metrics
+Instrumentator().instrument(app).expose(app)
 
 @app.get("/health")
 async def health_check():
