@@ -191,6 +191,13 @@ try:
     @app.exception_handler(RateLimitExceeded)
     async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
         request_id = get_request_id(request)
+        retry_after = "60"
+        if hasattr(exc, "retry_after") and exc.retry_after is not None:
+            retry_after = str(int(exc.retry_after))
+        elif hasattr(exc, "limit") and exc.limit is not None:
+            # Fallback based on limit value
+            retry_after = "60"
+        
         return JSONResponse(
             status_code=429,
             content={
@@ -198,6 +205,7 @@ try:
                 "error_code": "RATE_LIMIT_EXCEEDED",
                 "request_id": request_id,
             },
+            headers={"Retry-After": retry_after}
         )
 except Exception:
     pass

@@ -19,6 +19,12 @@ if settings.rate_limit_enabled:
                 f"Failed to initialize Upstash Redis rate limit storage, falling back to memory: {e}"
             )
 
+def ip_whitelist_filter(request) -> bool:
+    client_ip = request.client.host if request.client else None
+    if client_ip in settings.rate_limit_whitelist_ips:
+        return True
+    return False
+
 limiter = Limiter(
     key_func=get_remote_address,
     storage_uri=storage_uri,
@@ -26,4 +32,5 @@ limiter = Limiter(
     default_limits=[settings.rate_limit_global],
     enabled=settings.rate_limit_enabled,
     headers_enabled=True,  # X-RateLimit-* headers
+    request_filter=ip_whitelist_filter,
 )
