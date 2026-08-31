@@ -10,6 +10,7 @@ from sqlalchemy import (
     JSON,
     CheckConstraint,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import declarative_base, relationship
 import uuid
@@ -159,3 +160,34 @@ class ReviewVote(Base):
         UniqueConstraint("user_id", "review_id", name="uq_user_review_vote"),
     )
 
+
+class CSPViolationReport(Base):
+    __tablename__ = "csp_violation_reports"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_uri = Column(String, index=True)
+    referrer = Column(String)
+    violated_directive = Column(String, index=True)
+    effective_directive = Column(String)
+    original_policy = Column(Text)
+    disposition = Column(String)
+    blocked_uri = Column(String, index=True)
+    status_code = Column(Integer)
+    source_file = Column(String)
+    line_number = Column(Integer)
+    column_number = Column(Integer)
+    user_agent = Column(Text)
+    ip_address = Column(String, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class WAFBlockedIP(Base):
+    __tablename__ = "waf_blocked_ips"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    ip_address = Column(String, unique=True, index=True, nullable=False)
+    reason = Column(String, nullable=False)
+    threat_score = Column(Integer, default=100)
+    is_permanent = Column(Boolean, default=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -1,11 +1,11 @@
 import re
 import httpx
 import structlog
-from typing import Dict, List, Optional
+from typing import List, Optional
 from pydantic import BaseModel
 import json
 import hashlib
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from sqlalchemy import or_, and_, cast, String, extract
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_redis, get_db
 from app.db.models import Movie
+from app.services.llm import generate_cinebot_response
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/search", tags=["search"])
@@ -44,7 +45,6 @@ class SuggestItem(BaseModel):
     title: str
     poster_path: Optional[str] = None
     year: Optional[int] = None
-
 
 
 async def extract_keywords_with_gemini(query: str) -> str:
@@ -142,7 +142,6 @@ async def suggest_search(
 
 
 @router.get("/semantic", response_model=SearchResponse)
-
 async def semantic_search(
     request: Request,
     q: str = Query("", description="Natural language search query"),
@@ -158,9 +157,8 @@ async def semantic_search(
     Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.
     """
     has_filters = bool(genres or min_rating is not None or year_from is not None or year_to is not None)
-    # Try Hybrid Search first if query is provided
+    
     if q:
-
         try:
             from app.services.hybrid_search import HybridSearchEngine
             engine = HybridSearchEngine(db)
@@ -196,7 +194,6 @@ async def semantic_search(
         except Exception as e:
             logger.warning("hybrid_search_failed_falling_back", error=str(e))
 
-    # 1. Try Qdrant vector search if enabled (skip if filters are applied)
     if settings.qdrant_url and not has_filters and q:
         try:
             from app.services.embeddings import get_embedder
@@ -206,7 +203,6 @@ async def semantic_search(
             query_vector = embedder.embed_text(q)
             
             client = AsyncQdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-            # AsyncQdrantClient collections API is async
             collections = await client.get_collections()
             
             if any(c.name == "movies" for c in collections.collections) and query_vector:
@@ -223,7 +219,7 @@ async def semantic_search(
                             id=str(hit.payload.get("original_movie_id", hit.id)),
                             title=hit.payload.get("title", "Unknown"),
                             overview=hit.payload.get("overview", ""),
-                            poster_path=None, # Depending on payload structure
+                            poster_path=None,
                             similarity_score=float(hit.score)
                         ) for hit in qdrant_results
                     ]
@@ -231,12 +227,10 @@ async def semantic_search(
         except Exception as e:
             logger.warning("qdrant_search_failed_falling_back", error=str(e))
 
-    # 2. Extract keywords using Gemini (if key configured)
     keywords = q
     if settings.gemini_api_key:
         keywords = await extract_keywords_with_gemini(q)
 
-    # 3. Try PostgreSQL DB search
     cleaned_q = sanitize_query(keywords)
     words = [w for w in re.split(r'\s+', cleaned_q) if len(w) > 1]
     if not words and q:
@@ -300,7 +294,6 @@ async def semantic_search(
     except Exception as e:
         logger.warning("postgres_search_failed_falling_back", error=str(e))
 
-    # 4. Fallback to TMDB Search
     if has_filters:
         return SearchResponse(query=q, results=results if 'results' in locals() else [])
 
@@ -361,13 +354,11 @@ async def semantic_search(
 
     return SearchResponse(query=q, results=results)
 
-# ==============================================================================
-# --- NEW: CINEBOT ASSISTANT ENDPOINT START ---
-# ==============================================================================
 
 class CineBotRequest(BaseModel):
     message: str
-    history: List[Dict[str, str]] = []
+    history: List[dict] = []
+
 
 class CineBotMovieResult(BaseModel):
     id: str
@@ -376,9 +367,11 @@ class CineBotMovieResult(BaseModel):
     poster_path: Optional[str] = None
     reasoning: str
 
+
 class CineBotResponseModel(BaseModel):
     conversational_reply: str
     recommendations: List[CineBotMovieResult]
+
 
 @router.post("/assistant", response_model=CineBotResponseModel)
 async def cinebot_assistant(
@@ -386,24 +379,19 @@ async def cinebot_assistant(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    AI conversational movie assistant endpoint.
-    Accepts conversation history and user message, queries Gemini, and returns structured recommendations.
+    AI conversational movie assistant endpoint (`/api/v1/search/assistant`).
+    Accepts conversation history and user message, queries Gemini using structured schema output, and returns recommendations.
     """
     try:
-        # Fetch a subset of movies to provide context to the LLM (e.g., top 50 popular movies)
-        # In a production environment, this would be a vector search based on the user's message.
         stmt = select(Movie).order_by(Movie.popularity.desc()).limit(50)
         result = await db.execute(stmt)
         movies = result.scalars().all()
         
-        # Format movies context for the LLM
         movies_context = "\n".join([
             f"ID: {m.id}, Title: {m.title}, Genres: {', '.join(m.genres) if m.genres else 'Unknown'}, Overview: {m.overview[:150]}..."
             for m in movies
         ])
 
-        # Call the LLM service
-        from app.services.llm import generate_cinebot_response
         llm_response = await generate_cinebot_response(
             conversation_history=request.history,
             user_message=request.message,
@@ -413,7 +401,6 @@ async def cinebot_assistant(
         if not llm_response:
             raise HTTPException(status_code=500, detail="Failed to generate AI response")
 
-        # Map LLM recommendations to actual movie data from DB for accurate poster paths, etc.
         final_recommendations = []
         movie_dict = {str(m.id): m for m in movies}
         
@@ -428,7 +415,6 @@ async def cinebot_assistant(
                     reasoning=rec.reasoning
                 ))
             else:
-                # Fallback if LLM hallucinated an ID not in our top 50
                 final_recommendations.append(CineBotMovieResult(
                     id=rec.id,
                     title=rec.title,

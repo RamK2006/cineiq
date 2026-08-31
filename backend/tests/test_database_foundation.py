@@ -11,6 +11,8 @@ EXPECTED_TABLES = {
     "reviews",
     "review_votes",
     "user_movie_actions",
+    "csp_violation_reports",
+    "waf_blocked_ips",
 }
 
 
