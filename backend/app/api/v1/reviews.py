@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from math import ceil
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -10,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
-from app.db.models import Movie, Review, User
+from app.db.models import Movie, Review, ReviewVote, User
 from app.db.session import get_db
 
 router = APIRouter(tags=["reviews"])
@@ -26,6 +27,10 @@ class ReviewUpdate(BaseModel):
     text: str | None = Field(default=None, max_length=5000)
 
 
+class VotePayload(BaseModel):
+    vote_type: int  # +1 or -1
+
+
 class ReviewResponse(BaseModel):
     id: str
     user_id: str
@@ -35,6 +40,8 @@ class ReviewResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_owner: bool = False
+    helpful_count: int = 0
+    user_vote: int = 0
 
 
 class ReviewListResponse(BaseModel):
@@ -61,7 +68,12 @@ async def _ensure_user_and_movie(
     await db.flush()
 
 
-def _response(review: Review, current_user_id: str | None) -> ReviewResponse:
+def _response(
+    review: Review,
+    current_user_id: str | None = None,
+    helpful_count: int = 0,
+    user_vote: int = 0,
+) -> ReviewResponse:
     return ReviewResponse(
         id=str(review.id),
         user_id=review.user_id,
@@ -71,6 +83,8 @@ def _response(review: Review, current_user_id: str | None) -> ReviewResponse:
         created_at=review.created_at,
         updated_at=review.updated_at,
         is_owner=current_user_id == review.user_id,
+        helpful_count=helpful_count,
+        user_vote=user_vote,
     )
 
 
@@ -115,6 +129,7 @@ async def list_reviews(
     movie_id: str,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=10, ge=1, le=50),
+    current_user_id: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     total_result = await db.execute(
@@ -134,8 +149,30 @@ async def list_reviews(
     )
     reviews = result.scalars().all()
 
+    items: list[ReviewResponse] = []
+    for review in reviews:
+        helpful_res = await db.execute(
+            select(func.count(ReviewVote.id)).where(
+                ReviewVote.review_id == review.id,
+                ReviewVote.vote_type == 1,
+            )
+        )
+        helpful_count = helpful_res.scalar() or 0
+
+        user_vote = 0
+        if current_user_id:
+            uv_res = await db.execute(
+                select(ReviewVote.vote_type).where(
+                    ReviewVote.review_id == review.id,
+                    ReviewVote.user_id == current_user_id,
+                )
+            )
+            user_vote = uv_res.scalar_one_or_none() or 0
+
+        items.append(_response(review, current_user_id, helpful_count, user_vote))
+
     return ReviewListResponse(
-        items=[_response(review, None) for review in reviews],
+        items=items,
         page=page,
         limit=limit,
         total=total,
@@ -183,3 +220,53 @@ async def delete_review(
 
     await db.delete(review)
     await db.commit()
+
+
+@router.post("/reviews/{review_id}/vote", status_code=status.HTTP_200_OK)
+@router.post("/api/v1/reviews/{review_id}/vote", status_code=status.HTTP_200_OK)
+async def vote_review(
+    review_id: str,
+    payload: VotePayload,
+    user_id: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Toggles or flips an authenticated user's helpfulness vote on a target review item.
+    Enforces spam resilience through strict database constraints.
+    """
+    if payload.vote_type not in (1, -1):
+        raise HTTPException(status_code=400, detail="Invalid vote type configuration token.")
+
+    review = await db.get(Review, review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Target review resource not found.")
+
+    stmt = select(ReviewVote).where(
+        ReviewVote.user_id == user_id,
+        ReviewVote.review_id == review_id
+    )
+    result = await db.execute(stmt)
+    existing_vote = result.scalar_one_or_none()
+
+    if existing_vote:
+        if existing_vote.vote_type == payload.vote_type:
+            # If the same button is pressed twice, undo the vote completely (retract)
+            await db.delete(existing_vote)
+            await db.commit()
+            return {"message": "Vote retracted successfully.", "user_vote": 0}
+        else:
+            # If the user switches their vote (e.g., from +1 to -1), update it in place
+            existing_vote.vote_type = payload.vote_type
+            await db.commit()
+            return {"message": "Vote flipped successfully.", "user_vote": payload.vote_type}
+    else:
+        # Create a fresh vote record
+        new_vote = ReviewVote(
+            user_id=user_id,
+            review_id=review_id,
+            vote_type=payload.vote_type
+        )
+        db.add(new_vote)
+        await db.commit()
+        return {"message": "Vote recorded successfully.", "user_vote": payload.vote_type}
+
