@@ -1,3 +1,5 @@
+import os
+from typing import List
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -9,10 +11,38 @@ from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
+# Read configuration from environment variables with production fallbacks
+ENV: str = os.getenv("ENV", os.getenv("ENVIRONMENT", "production")).lower()
+
+# Strict whitelist configuration (Prohibiting wildcards with credentials in production)
+ALLOWED_ORIGINS: List[str] = [
+    "https://cineiq.com",
+    "https://www.cineiq.com",
+]
+
+if ENV not in ("production", "prod"):
+    ALLOWED_ORIGINS.extend([
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ])
+
+# Strict CSP Directive configuration
+CSP_DIRECTIVES: str = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: https://unsplash.com https://images.unsplash.com https://image.tmdb.org; "
+    "connect-src 'self' https://cineiq.com; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self';"
+)
+
 security = HTTPBearer(auto_error=False)
 
 # Simple dictionary cache with timestamp since cachetools was removed
 _jwks_cache = {"data": None, "expires_at": 0}
+
 
 
 async def get_jwks():

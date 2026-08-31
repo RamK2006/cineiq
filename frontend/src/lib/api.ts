@@ -26,11 +26,20 @@ export interface GenrePreference {
   score: number;
 }
 
+export interface RadarItem {
+  subject: string;
+  A: number;
+  fullMark: number;
+}
+
 export interface ProfileStats {
   movies_watched: number;
   reviews: number;
   genre_preferences: GenrePreference[];
+  radarData?: RadarItem[];
+  summaryMessage?: string;
 }
+
 
 export interface ReviewItem {
   id: string;
@@ -41,7 +50,10 @@ export interface ReviewItem {
   created_at: string;
   updated_at: string;
   is_owner: boolean;
+  helpful_count?: number;
+  user_vote?: number;
 }
+
 
 export interface ReviewListResponse {
   items: ReviewItem[];
@@ -161,3 +173,16 @@ export function deleteMovieReview(reviewId: string, token: string) {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
+
+export function voteMovieReview(
+  reviewId: string,
+  token: string,
+  voteType: number,
+) {
+  return reviewRequest<{ message: string; user_vote: number }>(`/reviews/${reviewId}/vote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ vote_type: voteType }),
+  });
+}
+
