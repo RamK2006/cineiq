@@ -7,7 +7,6 @@ import structlog
 from fastapi import FastAPI, Request
 import httpx
 from fastapi.exceptions import RequestValidationError
-import httpx
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -40,7 +39,6 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    app.state.http_client = httpx.AsyncClient(timeout=10.0)
     logger.info("cineiq_starting", host=settings.backend_host, port=settings.backend_port)
     try:
         async with engine.begin() as conn:
@@ -88,16 +86,13 @@ async def lifespan(app: FastAPI):
 
     yield
     # Shutdown
-    if hasattr(app.state, "http_client"):
-        await app.state.http_client.aclose()
-    logger.info("cineiq_stopped")
-    # Close shared httpx client if created
     try:
         if getattr(app.state, "http_client", None) is not None:
             await app.state.http_client.aclose()
             logger.info("shared_httpx_client_closed")
     except Exception as e:
         logger.error("httpx_client_close_failed", error=str(e))
+    logger.info("cineiq_stopped")
 
     await engine.dispose()
 

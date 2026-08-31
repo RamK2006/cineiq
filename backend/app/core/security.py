@@ -115,3 +115,27 @@ async def get_current_user(payload: dict = Depends(verify_token)):
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found in token")
     return user_id
+
+async def fetch_clerk_user_info(user_id: str) -> dict:
+    if not settings.clerk_secret_key or "REPLACE" in settings.clerk_secret_key:
+        return {}
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://api.clerk.com/v1/users/{user_id}",
+                headers={"Authorization": f"Bearer {settings.clerk_secret_key}"}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                first_name = data.get("first_name") or ""
+                last_name = data.get("last_name") or ""
+                display_name = f"{first_name} {last_name}".strip()
+                if not display_name:
+                    display_name = data.get("username")
+                return {
+                    "display_name": display_name,
+                    "avatar_url": data.get("image_url")
+                }
+    except Exception as e:
+        logger.error("clerk_user_fetch_failed", error=str(e))
+    return {}

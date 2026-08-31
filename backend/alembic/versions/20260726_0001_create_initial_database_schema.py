@@ -9,7 +9,6 @@ from collections.abc import Sequence
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 
 revision: str = "20260726_0001"
@@ -27,7 +26,7 @@ def upgrade() -> None:
         sa.Column("release_date", sa.DateTime(timezone=True), nullable=True),
         sa.Column("poster_path", sa.String(), nullable=True),
         sa.Column("backdrop_path", sa.String(), nullable=True),
-        sa.Column("genres", postgresql.ARRAY(sa.String()), nullable=True),
+        sa.Column("genres", sa.JSON(), nullable=True),
         sa.Column("popularity", sa.Float(), nullable=True),
         sa.Column("vote_average", sa.Float(), nullable=True),
         sa.Column("vote_count", sa.Integer(), nullable=True),
@@ -54,7 +53,7 @@ def upgrade() -> None:
         "interactions",
         sa.Column(
             "id",
-            postgresql.UUID(as_uuid=True),
+            sa.String(),
             nullable=False,
         ),
         sa.Column("user_id", sa.String(), nullable=True),
@@ -84,7 +83,7 @@ def upgrade() -> None:
         "watch_rooms",
         sa.Column(
             "id",
-            postgresql.UUID(as_uuid=True),
+            sa.String(),
             nullable=False,
         ),
         sa.Column("creator_id", sa.String(), nullable=True),

@@ -41,6 +41,8 @@ export interface ReviewItem {
   created_at: string;
   updated_at: string;
   is_owner: boolean;
+  reviewer_name?: string | null;
+  reviewer_avatar?: string | null;
 }
 
 export interface ReviewListResponse {
@@ -51,6 +53,7 @@ export interface ReviewListResponse {
   pages: number;
   average_rating: number;
   rating_count: number;
+  rating_distribution: Record<number, number>;
 }
 
 export async function apiRequest(endpoint: string, options: RequestInit = {}) {
