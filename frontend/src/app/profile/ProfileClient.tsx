@@ -15,6 +15,8 @@ import { AlertCircle, Settings } from 'lucide-react';
 import { useAuth, useClerk, useUser } from '@clerk/nextjs';
 
 import { fetchProfileStats, ProfileStats } from '@/lib/api';
+import ShareCardModal from '@/components/ShareCardModal';
+import { Share } from 'lucide-react';
 
 const EMPTY_STATS: ProfileStats = {
   movies_watched: 0,
@@ -30,6 +32,7 @@ export default function ProfileClient() {
   const [stats, setStats] = useState<ProfileStats>(EMPTY_STATS);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -89,7 +92,18 @@ export default function ProfileClient() {
         <div className="glass-panel" style={{ maxWidth: '520px', margin: '0 auto', padding: '40px' }}>
           <div style={{ height: '24px', width: '55%', background: 'rgba(255,255,255,.08)', borderRadius: '8px' }} />
         </div>
-      </main>
+  
+      <ShareCardModal 
+        isOpen={isShareModalOpen} 
+        onClose={() => setIsShareModalOpen(false)} 
+        userName={userName} 
+        userAvatar={user?.imageUrl || ''} 
+        moviesWatched={stats.movies_watched} 
+        radarData={stats.radarData || []} 
+        primaryGenre={genrePreferences[0]?.genre || 'Movies'}
+      />
+    
+    </main>
     );
   }
 
@@ -143,7 +157,21 @@ export default function ProfileClient() {
 
         <section style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-panel" style={{ padding: '32px' }}>
-            <h2 style={{ fontSize: '20px', marginBottom: '24px' }}>Taste Profile</h2>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <h2 style={{ fontSize: '20px', margin: 0 }}>Taste Profile</h2>
+                {hasTasteProfile && !statsLoading && (
+                    <button 
+                        onClick={() => setIsShareModalOpen(true)}
+                        className="btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '20px', fontSize: '14px' }}
+                    >
+                        <Share size={16} />
+                        Share Taste
+                    </button>
+                )}
+            </div>
+    
 
             {statsError ? (
               <div role="alert" style={{ display: 'flex', gap: '10px', alignItems: 'center', color: 'var(--text-secondary)' }}>
@@ -190,6 +218,17 @@ export default function ProfileClient() {
           </div>
         </section>
       </div>
+
+      <ShareCardModal 
+        isOpen={isShareModalOpen} 
+        onClose={() => setIsShareModalOpen(false)} 
+        userName={userName} 
+        userAvatar={user?.imageUrl || ''} 
+        moviesWatched={stats.movies_watched} 
+        radarData={stats.radarData || []} 
+        primaryGenre={genrePreferences[0]?.genre || 'Movies'}
+      />
+    
     </main>
   );
 }
