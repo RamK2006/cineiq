@@ -33,6 +33,7 @@ class User(Base):
     interactions = relationship("Interaction", back_populates="user")
     watch_rooms = relationship("WatchRoom", back_populates="creator")
     reviews = relationship("Review", back_populates="user", cascade="all, delete-orphan")
+    movie_actions = relationship("UserMovieAction", back_populates="user", cascade="all, delete-orphan")
 
 
 class Movie(Base):
@@ -57,6 +58,7 @@ class Movie(Base):
     
     interactions = relationship("Interaction", back_populates="movie")
     reviews = relationship("Review", back_populates="movie", cascade="all, delete-orphan")
+    movie_actions = relationship("UserMovieAction", back_populates="movie", cascade="all, delete-orphan")
 
 
 class Interaction(Base):
@@ -71,6 +73,39 @@ class Interaction(Base):
     
     user = relationship("User", back_populates="interactions")
     movie = relationship("Movie", back_populates="interactions")
+
+
+class UserMovieAction(Base):
+    """A user's explicit action on a movie (watchlist / favorite).
+
+    Kept separate from ``Interaction`` so recommendation signals
+    (view/like/dislike) are not polluted by watchlist/favorite state.
+    The unique constraint guarantees at most one action per
+    (user, movie, interaction_type) tuple.
+    """
+    __tablename__ = "user_movie_actions"
+
+    id = Column(String, primary_key=True, default=_generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    movie_id = Column(String, ForeignKey("movies.id", ondelete="CASCADE"), nullable=False, index=True)
+    interaction_type = Column(String, nullable=False, index=True)  # 'watchlist' | 'favorite'
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", back_populates="movie_actions")
+    movie = relationship("Movie", back_populates="movie_actions")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "movie_id", "interaction_type", name="uq_user_movie_action_type"
+        ),
+        CheckConstraint(
+            "interaction_type IN ('watchlist', 'favorite')", name="ck_user_movie_action_type"
+        ),
+    )
 
 
 class WatchRoom(Base):

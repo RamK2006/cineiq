@@ -149,6 +149,10 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 
             return payload
 
+    except HTTPException:
+        # Let deliberate auth decisions (future iat, expired token, ...)
+        # propagate with their specific status code and message.
+        raise
     except Exception as e:
         logger.error("jwt_validation_failed", error=str(e), exc_info=True)
         raise HTTPException(
