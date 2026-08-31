@@ -1,3 +1,4 @@
+import pytest
 import unittest
 
 from app.api.v1 import recommend
@@ -44,5 +45,20 @@ class RecommendationHelpersTests(unittest.TestCase):
         )
 
 
+@pytest.mark.asyncio
+async def test_recommend_trending_async(async_client):
+    """Test /api/v1/recommend/trending endpoint asynchronously with async_client fixture."""
+    response = await async_client.get("/api/v1/recommend/trending?limit=5")
+    assert response.status_code in (200, 503)
+    data = response.json()
+    if response.status_code == 200:
+        assert "algorithm" in data
+        assert "movies" in data
+        assert isinstance(data["movies"], list)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+

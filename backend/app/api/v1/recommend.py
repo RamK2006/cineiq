@@ -24,7 +24,10 @@ TMDB_GENRE_CACHE_KEY = "tmdb:genres:movie"
 TMDB_GENRE_CACHE_TTL_SECONDS = 24 * 60 * 60
 
 def get_http_client(request: Request) -> httpx.AsyncClient:
-    return request.app.state.http_client
+    if hasattr(request.app.state, "http_client") and request.app.state.http_client is not None:
+        return request.app.state.http_client
+    return httpx.AsyncClient()
+
 
 class MovieItem(BaseModel):
     id: str
