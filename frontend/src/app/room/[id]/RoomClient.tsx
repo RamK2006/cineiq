@@ -55,10 +55,7 @@ export default function RoomClient() {
   const [isChatVisible, setChatVisible] = useState(true);
 
   const roomVideoAreaRef = useRef<HTMLDivElement>(null);
-  const availableTracks: SubtitleTrackData[] = [
-    { id: 'en', label: 'English', language: 'en', src: '/subtitles/en.srt', kind: 'subtitles', format: 'srt' },
-    { id: 'es', label: 'Spanish', language: 'es', src: '/subtitles/es.vtt', kind: 'subtitles', format: 'vtt' }
-  ];
+
 
   // WebRTC Voice Mesh state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -165,106 +162,12 @@ export default function RoomClient() {
       if (data?.user) setMutedUsers(prev => prev.filter(u => u !== data.user));
     });
 
-    ws.current.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.error && showPasscodeModal) {
-            setPasscodeError(message.error);
-            return;
-        }
-        
-        switch (message.type) {
-          case 'PASSCODE_REQUIRED':
-            setShowPasscodeModal(true);
-            setPasscodeError('');
-            break;
-          case 'PASSCODE_REJECTED':
-            setPasscodeError('Incorrect passcode');
-            break;
-          case 'PASSCODE_ACCEPTED':
-            setShowPasscodeModal(false);
-            setPasscodeError('');
-            break;
-          case 'room_state':
-            setHostId(message.payload.host_id);
-            setParticipants(message.payload.participants);
-            setIsLocked(message.payload.is_locked);
-            setMutedUsers(message.payload.muted_users || []);
-            break;
-          case 'play':
-            setIsPlaying(true);
-            if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
-            break;
-          case 'pause':
-            setIsPlaying(false);
-            if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
-            break;
-          case 'seek':
-            if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
-            break;
-          case 'history':
-            const historyMessages = message.payload || [];
-            setMessages(historyMessages.map((msg: any) => ({
-              user: msg.user || 'Unknown',
-              text: msg.text || ''
-            })));
-            break;
-          case 'chat':
-            setMessages(prev => [...prev, { user: message.user || 'Unknown', text: message.payload?.text || '' }]);
-            break;
-          case 'user_joined':
-            setParticipants(prev => {
-               if (!prev.includes(message.user)) return [...prev, message.user];
-               return prev;
-            });
-            setMessages(prev => [...prev, { user: 'System', text: `${message.user} joined the room` }]);
-            break;
-          case 'user_left':
-            setParticipants(prev => prev.filter(p => p !== message.user));
-            setMessages(prev => [...prev, { user: 'System', text: `${message.user} left the room` }]);
-            break;
-          case 'sync':
-            if (message.payload?.action === 'play') setIsPlaying(true);
-            else if (message.payload?.action === 'pause') setIsPlaying(false);
-            if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
-            if (message.payload?.activeTrackId !== undefined) setActiveTrackId(message.payload.activeTrackId);
-            break;
-          case 'SUBTITLE_TRACK_CHANGED':
-            setActiveTrackId(message.payload?.trackId ?? null);
-            break;
-          case 'TRANSFER_HOST':
-            setHostId(message.payload.host_id);
-            break;
-          case 'USER_KICKED':
-            setKicked(true);
-            expectedDisconnect.current = true;
-            if (ws.current) ws.current.close();
-            setTimeout(() => {
-                router.push('/');
-            }, 3000);
-            break;
-          case 'USER_MUTED':
-            setMutedUsers(prev => prev.includes(message.user) ? prev : [...prev, message.user]);
-            break;
-          case 'USER_UNMUTED':
-            setMutedUsers(prev => prev.filter(u => u !== message.user));
-            break;
-          case 'ROOM_LOCKED':
-            setIsLocked(true);
-            break;
-          case 'ROOM_UNLOCKED':
-            setIsLocked(false);
-            break;
-        }
-      } catch (err) {
-        console.error('Failed to parse WS message', err);
-      }
-    };
     ws.on('ROOM_LOCKED', () => setIsLocked(true));
     ws.on('ROOM_UNLOCKED', () => setIsLocked(false));
     ws.on('PASSCODE_REQUIRED', () => { setShowPasscodeModal(true); setPasscodeError(''); });
     ws.on('PASSCODE_REJECTED', () => setPasscodeError('Incorrect passcode'));
     ws.on('PASSCODE_ACCEPTED', () => { setShowPasscodeModal(false); setPasscodeError(''); });
+
 
     // Connect the underlying WebSocket
     ws.connect(userName, userAvatar);
@@ -280,29 +183,12 @@ export default function RoomClient() {
     };
   }, [connectWebSocket]);
 
-  const handleTrackChange = (trackId: string | null) => {
-    setActiveTrackId(trackId);
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: 'SUBTITLE_TRACK_CHANGED',
-        payload: { trackId }
-      }));
-    }
-  };
-
-  const emitSync = (action: 'play' | 'pause' | 'seek', newProgress?: number) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: action,
-        payload: {
-          progress: newProgress !== undefined ? newProgress : progress
-        }
-      }));
   const emitSync = useCallback((action: 'play' | 'pause' | 'seek', newProgress?: number) => {
     if (wsRef.current) {
       wsRef.current.send(action, { progress: newProgress !== undefined ? newProgress : progress });
     }
   }, [progress]);
+
 
   const handlePlayPause = useCallback(() => {
     const newIsPlaying = !isPlaying;
@@ -437,70 +323,7 @@ export default function RoomClient() {
       </AnimatePresence>
 
       {/* Video Area */}
-      <div className="room-video-area" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        
-        {/* Connection Status Indicator */}
-        <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: 20 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: connectionStatus === 'connected' ? '#10b981' : connectionStatus === 'connecting' ? '#f59e0b' : '#ef4444' }} />
-          <span style={{ fontSize: 12, color: 'white', textTransform: 'capitalize' }}>{connectionStatus}</span>
-        </div>
-        
-        {isHost && (
-            <div style={{ position: 'absolute', top: 20, left: 140, zIndex: 50 }}>
-                <button onClick={toggleLock} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: 20, color: 'white', border: 'none', cursor: 'pointer' }}>
-                    {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
-                    <span style={{ fontSize: 12 }}>{isLocked ? 'Room Locked' : 'Room Unlocked'}</span>
-                </button>
-            </div>
-        )}
 
-        {!showPasscodeModal && (
-          <VideoPlayer
-            isPlaying={isPlaying}
-            progress={progress}
-            onPlayPause={(playing) => { setIsPlaying(playing); emitSync(playing ? 'play' : 'pause'); }}
-            onSeek={(p) => { setProgress(p); emitSync('seek', p); }}
-            tracks={availableTracks}
-            activeTrackId={activeTrackId}
-            onTrackChange={handleTrackChange}
-          />
-        {/* Floating Voice Mesh Peer Overlay */}
-        <div style={{ position: 'absolute', top: 20, right: 340, zIndex: 50, maxWidth: '320px' }}>
-          <VoiceMeshOverlay
-            localStream={localStream}
-            peerStreams={peerStreams}
-            cameraActive={cameraActive}
-            micActive={micActive || isPttActive}
-            onToggleCamera={toggleCamera}
-            onToggleMic={toggleMic}
-            onSelectDevice={handleSelectDevice}
-            onVoiceStatusChange={handleVoiceStatusChange}
-            shortcutKey={shortcutKey}
-            onChangeShortcut={changeShortcut}
-
-          />
-        </div>
-
-
-        <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: '#111827', color: 'var(--text-secondary)' }}>
-          No licensed playback source is configured for this room.
-        </div>
-        
-        {/* Play/Pause Overlay animation */}
-        {!isPlaying && !showPasscodeModal && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }}>
-            <motion.button 
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={handlePlayPause}
-              aria-label="Play video"
-              style={{ background: 'var(--accent-primary)', border: 'none', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 0 30px rgba(229,9,20,0.5)' }}
-            >
-              <Play size={40} fill="white" color="white" style={{ marginLeft: '6px' }} />
-            </motion.button>
-          </div>
-        )}
-      </div>
       <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-black">
         {!isFullscreen && (
           <div className="absolute left-5 top-5 z-50 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">

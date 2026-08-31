@@ -76,7 +76,8 @@ export default function VideoPlayer({
       const loaded: (SubtitleTrackData & { objectUrl: string })[] = [];
       for (const t of tracks) {
         try {
-          const objectUrl = await fetchAndProcessSubtitle(t.src, t.format);
+          const objectUrl = await fetchAndProcessSubtitle(t.src, t.format || 'srt');
+
           objectUrlsToRevoke.push(objectUrl);
           loaded.push({ ...t, objectUrl });
         } catch (e) {

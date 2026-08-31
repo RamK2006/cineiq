@@ -9,22 +9,52 @@ import { CineBotMessage } from '@/lib/cinebot';
 interface CineBotDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  messages: CineBotMessage[];
-  input: string;
-  isLoading: boolean;
-  onInputChange: (value: string) => void;
-  onSendMessage: (e: React.FormEvent) => void;
+  messages?: CineBotMessage[];
+  input?: string;
+  isLoading?: boolean;
+  onInputChange?: (value: string) => void;
+  onSendMessage?: (e: React.FormEvent) => void;
 }
 
 export default function CineBotDrawer({
   isOpen,
   onClose,
-  messages,
-  input,
-  isLoading,
-  onInputChange,
-  onSendMessage,
+  messages: propMessages,
+  input: propInput,
+  isLoading: propIsLoading,
+  onInputChange: propOnInputChange,
+  onSendMessage: propOnSendMessage,
 }: CineBotDrawerProps) {
+  const [internalMessages, setInternalMessages] = useState<CineBotMessage[]>([]);
+  const [internalInput, setInternalInput] = useState('');
+  const [internalLoading, setInternalLoading] = useState(false);
+
+  const messages = propMessages ?? internalMessages;
+  const input = propInput ?? internalInput;
+  const isLoading = propIsLoading ?? internalLoading;
+  const onInputChange = propOnInputChange ?? setInternalInput;
+  const onSendMessage = propOnSendMessage ?? (async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+    const userMsg = { role: 'user', content: input.trim() };
+    setInternalMessages(prev => [...prev, userMsg as CineBotMessage]);
+    setInternalInput('');
+    setInternalLoading(true);
+    try {
+      const res = await fetch('/api/v1/search/cinebot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: userMsg.content, history: internalMessages }),
+      });
+      const data = await res.json();
+      setInternalMessages(prev => [...prev, { role: 'assistant', content: data.conversational_reply, recommendations: data.recommendations }]);
+    } catch {
+      setInternalMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I couldn't process your request." }]);
+    } finally {
+      setInternalLoading(false);
+    }
+  });
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
