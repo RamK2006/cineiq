@@ -18,7 +18,6 @@ from app.api.v1.room import room_websocket_signaling_endpoint
 from app.core.config import settings
 from app.core.security import ALLOWED_ORIGINS, CSP_DIRECTIVES, ENV
 
-
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from app.core.rate_limit import limiter
@@ -36,6 +35,7 @@ from app.core.metrics import (
     db_query_duration_seconds,
     http_requests_total,
     http_request_duration_seconds,
+    websocket_connected_clients,
 )
 from sqlalchemy import event
 
@@ -291,7 +291,6 @@ try:
         if hasattr(exc, "retry_after") and exc.retry_after is not None:
             retry_after = str(int(exc.retry_after))
         elif hasattr(exc, "limit") and exc.limit is not None:
-            # Fallback based on limit value
             retry_after = "60"
 
         return JSONResponse(
@@ -308,7 +307,16 @@ except Exception:
     pass
 
 app.include_router(api_router, prefix="/api/v1")
-app.websocket("/ws/room/{room_id}/{user_id}")(room_websocket_signaling_endpoint)
+
+
+# Wrapped WebSocket endpoint with active client connection gauge instrumentation
+@app.websocket("/ws/room/{room_id}/{user_id}")
+async def instrumented_websocket_endpoint(websocket, room_id: str, user_id: str):
+    websocket_connected_clients.inc()
+    try:
+        await room_websocket_signaling_endpoint(websocket, room_id, user_id)
+    finally:
+        websocket_connected_clients.dec()
 
 
 # Instrument database queries via SQLAlchemy events on the sync engine
@@ -331,7 +339,6 @@ if Instrumentator:
 
 @app.get("/health")
 async def health_check():
-    # Single UTC timestamp used for every service in this request.
     last_checked = (
         datetime.datetime.now(datetime.timezone.utc)
         .replace(microsecond=0)
