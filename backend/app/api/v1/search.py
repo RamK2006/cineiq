@@ -1,12 +1,13 @@
 import re
 import httpx
 import structlog
-from typing import List, Optional
+from datetime import datetime
+from typing import List, Literal, Optional
 from pydantic import BaseModel
 import json
 import hashlib
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
-from sqlalchemy import or_, and_, cast, String, extract
+from sqlalchemy import and_, case, cast, or_, String
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +46,97 @@ class SuggestItem(BaseModel):
     title: str
     poster_path: Optional[str] = None
     year: Optional[int] = None
+
+
+SORT_RELEVANCE = "relevance"
+SORT_POPULARITY = "popularity"
+SORT_RATING = "rating"
+SORT_YEAR_DESC = "year_desc"
+SORT_RELEASE_DATE = "release_date"  # legacy alias (current frontend)
+
+
+def resolve_year_params(
+    year_min: Optional[int],
+    year_max: Optional[int],
+    year_from: Optional[int],
+    year_to: Optional[int],
+) -> tuple[Optional[int], Optional[int]]:
+    """year_min/year_max take precedence over the deprecated year_from/year_to."""
+    return (
+        year_min if year_min is not None else year_from,
+        year_max if year_max is not None else year_to,
+    )
+
+
+def _movie_matches_filters(
+    movie: "Movie",
+    genres: Optional[List[str]],
+    year_min: Optional[int],
+    year_max: Optional[int],
+    min_rating: Optional[float],
+) -> bool:
+    """In-memory twin of the SQL filters, used by the hybrid path."""
+    if genres:
+        movie_genres = [str(g).lower() for g in (movie.genres or [])]
+        if not all(g.lower() in movie_genres for g in genres):
+            return False
+    if min_rating is not None and (movie.vote_average or 0) < min_rating:
+        return False
+    if year_min is not None:
+        if movie.release_date is None or movie.release_date.year < year_min:
+            return False
+    if year_max is not None:
+        if movie.release_date is None or movie.release_date.year > year_max:
+            return False
+    return True
+
+
+def build_filtered_movie_query(
+    words: List[str],
+    genres: Optional[List[str]],
+    year_min: Optional[int],
+    year_max: Optional[int],
+    min_rating: Optional[float],
+    sort_by: str,
+    limit: int,
+):
+    """Apply structured filters + ordering to a Movie query (SQLite/Postgres)."""
+    conditions = []
+    if words:
+        word_conditions = []
+        for w in words:
+            word_conditions.append(Movie.title.ilike(f"%{w}%"))
+            word_conditions.append(Movie.overview.ilike(f"%{w}%"))
+        if word_conditions:
+            conditions.append(or_(*word_conditions))
+
+    if genres:
+        for g in genres:
+            conditions.append(cast(Movie.genres, String).ilike(f'%"{g}"%'))
+
+    if min_rating is not None:
+        conditions.append(Movie.vote_average >= min_rating)
+
+    if year_min is not None:
+        conditions.append(Movie.release_date >= datetime(year_min, 1, 1))
+    if year_max is not None:
+        conditions.append(Movie.release_date < datetime(year_max + 1, 1, 1))
+
+    stmt = select(Movie)
+    if conditions:
+        stmt = stmt.where(and_(*conditions))
+
+    if sort_by == SORT_RATING:
+        stmt = stmt.order_by(Movie.vote_average.desc())
+    elif sort_by in (SORT_YEAR_DESC, SORT_RELEASE_DATE):
+        stmt = stmt.order_by(Movie.release_date.desc())
+    elif sort_by == SORT_POPULARITY or not words:
+        stmt = stmt.order_by(Movie.popularity.desc())
+    else:
+        title_hits = or_(*[Movie.title.ilike(f"%{w}%") for w in words])
+        stmt = stmt.order_by(case((title_hits, 0), else_=1), Movie.popularity.desc())
+
+    return stmt.limit(limit)
 
 
 async def extract_keywords_with_gemini(query: str) -> str:
@@ -146,51 +238,77 @@ async def semantic_search(
     request: Request,
     q: str = Query("", description="Natural language search query"),
     limit: int = Query(10, le=50),
-    genres: Optional[List[str]] = Query(None, description="List of genres to filter by"),
-    min_rating: Optional[float] = Query(None, description="Minimum rating"),
-    year_from: Optional[int] = Query(None, description="Release year from"),
-    year_to: Optional[int] = Query(None, description="Release year to"),
-    sort_by: Optional[str] = Query("popularity", description="Sort by: popularity | rating | release_date"),
+    genres: Optional[List[str]] = Query(
+        None, description="Genres to filter by; a movie must contain all listed genres"
+    ),
+    year_min: Optional[int] = Query(None, ge=1900, le=2100, description="Minimum release year"),
+    year_max: Optional[int] = Query(None, ge=1900, le=2100, description="Maximum release year"),
+    min_rating: Optional[float] = Query(None, ge=0.0, le=10.0, description="Minimum rating (0.0-10.0)"),
+    sort_by: Literal[
+        SORT_RELEVANCE, SORT_POPULARITY, SORT_RATING, SORT_YEAR_DESC, SORT_RELEASE_DATE
+    ] = Query(SORT_RELEVANCE, description="Sort order: relevance | popularity | rating | year_desc"),
+    year_from: Optional[int] = Query(
+        None, ge=1900, le=2100, description="(deprecated, use year_min) Minimum release year"
+    ),
+    year_to: Optional[int] = Query(
+        None, ge=1900, le=2100, description="(deprecated, use year_max) Maximum release year"
+    ),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.
-    """
-    has_filters = bool(genres or min_rating is not None or year_from is not None or year_to is not None)
-    
+    """Semantic/keyword search with structured filters (genres, year range, min rating) and sort order."""
+    year_min, year_max = resolve_year_params(year_min, year_max, year_from, year_to)
+    has_filters = bool(genres or min_rating is not None or year_min is not None or year_max is not None)
+
+    cleaned_q = sanitize_query(q)
+    words = [w for w in re.split(r"\s+", cleaned_q) if len(w) > 1]
+    if not words and q:
+        words = [q[:50]]
+
     if q:
         try:
             from app.services.hybrid_search import HybridSearchEngine
             engine = HybridSearchEngine(db)
-            hybrid_results = await engine.search(q, limit=limit * 2)
-            
-            filtered_results = []
+            hybrid_results = await engine.search(q, limit=limit * 4)
+
+            filtered: list[tuple[Movie, SearchResult]] = []
             for movie, score in hybrid_results:
-                if genres:
-                    movie_genres = [g.lower() for g in (movie.genres or [])]
-                    if not all(g.lower() in movie_genres for g in genres):
+                if not _movie_matches_filters(movie, genres, year_min, year_max, min_rating):
+                    continue
+                # Filtered results must also match the query text (mirrors the SQL path).
+                if has_filters and words:
+                    title_l = (movie.title or "").lower()
+                    overview_l = (movie.overview or "").lower()
+                    if not any(
+                        w.lower() in title_l or w.lower() in overview_l for w in words
+                    ):
                         continue
-                if min_rating is not None and (movie.vote_average or 0) < min_rating:
-                    continue
-                if year_from is not None and movie.release_date and movie.release_date.year < year_from:
-                    continue
-                if year_to is not None and movie.release_date and movie.release_date.year > year_to:
-                    continue
-                
-                filtered_results.append(
-                    SearchResult(
-                        id=movie.id,
-                        title=movie.title,
-                        overview=movie.overview,
-                        poster_path=movie.poster_path,
-                        similarity_score=round(score, 5)
+                filtered.append(
+                    (
+                        movie,
+                        SearchResult(
+                            id=movie.id,
+                            title=movie.title,
+                            overview=movie.overview,
+                            poster_path=movie.poster_path,
+                            similarity_score=round(score, 5)
+                        )
                     )
                 )
-                if len(filtered_results) >= limit:
+                if len(filtered) >= limit:
                     break
-            
-            if filtered_results:
-                return SearchResponse(query=q, results=filtered_results)
+
+            if sort_by == SORT_RATING:
+                filtered.sort(key=lambda p: (p[0].vote_average or 0), reverse=True)
+            elif sort_by in (SORT_YEAR_DESC, SORT_RELEASE_DATE):
+                filtered.sort(
+                    key=lambda p: p[0].release_date.timestamp() if p[0].release_date else -1,
+                    reverse=True,
+                )
+            elif sort_by == SORT_POPULARITY:
+                filtered.sort(key=lambda p: (p[0].popularity or 0), reverse=True)
+
+            if filtered:
+                return SearchResponse(query=q, results=[r for _, r in filtered])
         except Exception as e:
             logger.warning("hybrid_search_failed_falling_back", error=str(e))
 
@@ -231,46 +349,16 @@ async def semantic_search(
     if settings.gemini_api_key:
         keywords = await extract_keywords_with_gemini(q)
 
-    cleaned_q = sanitize_query(keywords)
-    words = [w for w in re.split(r'\s+', cleaned_q) if len(w) > 1]
-    if not words and q:
-        words = [q[:50]]
-
     try:
-        conditions = []
-        if words:
-            word_conditions = []
-            for w in words:
-                word_conditions.append(Movie.title.ilike(f"%{w}%"))
-                word_conditions.append(Movie.overview.ilike(f"%{w}%"))
-            if word_conditions:
-                conditions.append(or_(*word_conditions))
-        
-        if genres:
-            for g in genres:
-                conditions.append(cast(Movie.genres, String).ilike(f'%"{g}"%'))
-                
-        if min_rating is not None:
-            conditions.append(Movie.vote_average >= min_rating)
-            
-        if year_from is not None:
-            conditions.append(extract('year', Movie.release_date) >= year_from)
-            
-        if year_to is not None:
-            conditions.append(extract('year', Movie.release_date) <= year_to)
-
-        stmt = select(Movie)
-        if conditions:
-            stmt = stmt.where(and_(*conditions))
-            
-        if sort_by == 'rating':
-            stmt = stmt.order_by(Movie.vote_average.desc())
-        elif sort_by == 'release_date':
-            stmt = stmt.order_by(Movie.release_date.desc())
-        else:
-            stmt = stmt.order_by(Movie.popularity.desc())
-            
-        stmt = stmt.limit(limit)
+        stmt = build_filtered_movie_query(
+            words=words,
+            genres=genres,
+            year_min=year_min,
+            year_max=year_max,
+            min_rating=min_rating,
+            sort_by=sort_by,
+            limit=limit,
+        )
         result = await db.execute(stmt)
         db_movies = result.scalars().all()
 
