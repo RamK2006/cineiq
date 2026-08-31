@@ -39,6 +39,7 @@ class WSMessage(BaseModel):
     ]
     payload: Optional[Any] = None
 
+
 class CreateRoomRequest(BaseModel):
     passcode: Optional[str] = None
 
@@ -153,6 +154,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+
 def get_room_meta(room_id: str) -> Optional[dict]:
     redis = get_redis()
     if redis:
@@ -163,6 +165,7 @@ def get_room_meta(room_id: str) -> Optional[dict]:
         except Exception:
             pass
     return in_memory_meta.get(room_id)
+
 
 def set_room_meta(room_id: str, meta: dict):
     redis = get_redis()
@@ -175,12 +178,14 @@ def set_room_meta(room_id: str, meta: dict):
     else:
         in_memory_meta[room_id] = meta
 
+
 def hash_passcode(passcode: str) -> str:
-    return bcrypt.hashpw(passcode.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    return bcrypt.hashpw(passcode.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
 
 def verify_passcode(passcode: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(passcode.encode('utf-8'), hashed.encode('utf-8'))
+        return bcrypt.checkpw(passcode.encode("utf-8"), hashed.encode("utf-8"))
     except Exception:
         return False
 
@@ -256,16 +261,19 @@ async def room_websocket_signaling_endpoint(
 # --- State Endpoints ---
 
 @router.post("/create")
-async def create_room(req: Optional[CreateRoomRequest] = None, current_user: str = Depends(get_current_user)):
+async def create_room(
+    req: Optional[CreateRoomRequest] = None,
+    current_user: str = Depends(get_current_user),
+):
     """Create a new Watch-Together room."""
     room_id = str(uuid.uuid4())
     passcode_hash = hash_passcode(req.passcode) if req and req.passcode else None
-    
+
     meta = {
         "host_id": current_user,
         "is_locked": bool(passcode_hash),
         "passcode_hash": passcode_hash,
-        "muted_users": []
+        "muted_users": [],
     }
     
     state_payload = json.dumps({"action": "pause", "progress": 0, "timestamp": time.time()})
@@ -277,10 +285,15 @@ async def create_room(req: Optional[CreateRoomRequest] = None, current_user: str
         except Exception as e:
             logger.error("redis_set_state_failed", error=str(e))
     else:
-        in_memory_state[room_id] = {"action": "pause", "progress": 0, "timestamp": time.time()}
+        in_memory_state[room_id] = {
+            "action": "pause",
+            "progress": 0,
+            "timestamp": time.time(),
+        }
 
     set_room_meta(room_id, meta)
     return {"room_id": room_id, "status": "created"}
+
 
 @router.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Query(None)):
@@ -305,7 +318,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
     if not meta:
         meta = {"host_id": user_id, "is_locked": False, "passcode_hash": None, "muted_users": []}
         set_room_meta(room_id, meta)
-        
+
     accepted = await manager.connect(room_id, websocket, user_id)
     if not accepted:
         return
@@ -323,13 +336,21 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                 message_dict = json.loads(data)
                 if message_dict.get("type") == "submit_passcode":
                     passcode = message_dict.get("payload", {}).get("passcode", "")
-                    if meta["passcode_hash"] and verify_passcode(passcode, meta["passcode_hash"]):
+                    if meta["passcode_hash"] and verify_passcode(
+                        passcode, meta["passcode_hash"]
+                    ):
                         verified = True
-                        await manager.send_personal_message({"type": "PASSCODE_ACCEPTED"}, websocket)
+                        await manager.send_personal_message(
+                            {"type": "PASSCODE_ACCEPTED"}, websocket
+                        )
                     else:
-                        await manager.send_personal_message({"type": "PASSCODE_REJECTED"}, websocket)
+                        await manager.send_personal_message(
+                            {"type": "PASSCODE_REJECTED"}, websocket
+                        )
                 else:
-                    await manager.send_personal_message({"error": "Passcode required to join"}, websocket)
+                    await manager.send_personal_message(
+                        {"error": "Passcode required to join"}, websocket
+                    )
         except WebSocketDisconnect:
             manager.disconnect(room_id, websocket)
             return
@@ -361,18 +382,22 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
     await websocket.send_json({"type": "history", "payload": history})
         
     # Send current participants and host
-    await websocket.send_json({
-        "type": "room_state",
-        "payload": {
-            "host_id": meta["host_id"],
-            "participants": manager.get_participants(room_id),
-            "is_locked": meta["is_locked"],
-            "muted_users": meta["muted_users"]
+    await websocket.send_json(
+        {
+            "type": "room_state",
+            "payload": {
+                "host_id": meta["host_id"],
+                "participants": manager.get_participants(room_id),
+                "is_locked": meta["is_locked"],
+                "muted_users": meta["muted_users"],
+            },
         }
-    })
+    )
 
     # Notify others
-    await manager.broadcast(room_id, {"type": "user_joined", "user": user_id}, sender=websocket)
+    await manager.broadcast(
+        room_id, {"type": "user_joined", "user": user_id}, sender=websocket
+    )
 
     try:
         while True:
@@ -459,7 +484,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                         await manager.send_personal_message({"error": "You are muted"}, websocket)
                         continue
 
-                    text = payload.get("text", "") if isinstance(payload, dict) else str(payload)
+                    text = (
+                        payload.get("text", "")
+                        if isinstance(payload, dict)
+                        else str(payload)
+                    )
                     text = html.escape(text.strip())
                     if not text or len(text) > 500:
                         continue
@@ -480,6 +509,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                     
                     await manager.broadcast(room_id, {"type": "chat", "user": user_id, "payload": {"text": text, "timestamp": chat_msg["timestamp"]}}, sender=websocket)
                     
+                elif msg_type in ("play", "pause", "seek", "SUBTITLE_TRACK_CHANGED"):
+                    await manager.broadcast(room_id, validated_msg.model_dump(), sender=websocket)
+                    
+
                 elif msg_type == "reaction":
                     await manager.broadcast(room_id, {"type": "reaction", "user": user_id, "payload": payload}, sender=websocket)
                     
@@ -488,7 +521,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                     if not is_currently_host:
                         await manager.send_personal_message({"error": "Only host can perform this action"}, websocket)
                         continue
-                    
+
                     if msg_type == "TRANSFER_HOST":
                         target_id = payload.get("user_id")
                         if target_id and target_id in manager.get_participants(room_id):
@@ -499,11 +532,25 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
 
                     elif msg_type == "KICK_USER":
                         target_id = payload.get("user_id")
-                        if target_id and target_id != user_id and target_id in manager.get_participants(room_id):
-                            target_ws = manager.get_websocket_for_user(room_id, target_id)
+                        if (
+                            target_id
+                            and target_id != user_id
+                            and target_id in manager.get_participants(room_id)
+                        ):
+                            target_ws = manager.get_websocket_for_user(
+                                room_id, target_id
+                            )
                             if target_ws:
-                                await manager.send_personal_message({"type": "USER_KICKED", "payload": {"reason": "Kicked by host"}}, target_ws)
-                                await target_ws.close(code=4000, reason="Kicked by host")
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "USER_KICKED",
+                                        "payload": {"reason": "Kicked by host"},
+                                    },
+                                    target_ws,
+                                )
+                                await target_ws.close(
+                                    code=4000, reason="Kicked by host"
+                                )
                                 manager.disconnect(room_id, target_ws)
                                 await manager.broadcast(room_id, {"type": "user_left", "user": target_id}, sender=websocket)
                             
@@ -516,26 +563,45 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                             else: muted_set.discard(target_id)
                             current_meta["muted_users"] = list(muted_set)
                             set_room_meta(room_id, current_meta)
-                            broadcast_event = "USER_MUTED" if is_muted else "USER_UNMUTED"
-                            await manager.broadcast(room_id, {"type": broadcast_event, "user": target_id}, sender=websocket)
-                            await manager.send_personal_message({"type": broadcast_event, "user": target_id}, websocket)
-                            
+                            broadcast_event = (
+                                "USER_MUTED" if is_muted else "USER_UNMUTED"
+                            )
+                            await manager.broadcast(
+                                room_id,
+                                {"type": broadcast_event, "user": target_id},
+                                sender=websocket,
+                            )
+                            await manager.send_personal_message(
+                                {"type": broadcast_event, "user": target_id}, websocket
+                            )
+
                     elif msg_type == "LOCK_ROOM":
                         current_meta["is_locked"] = True
                         set_room_meta(room_id, current_meta)
-                        await manager.broadcast(room_id, {"type": "ROOM_LOCKED"}, sender=websocket)
-                        await manager.send_personal_message({"type": "ROOM_LOCKED"}, websocket)
+                        await manager.broadcast(
+                            room_id, {"type": "ROOM_LOCKED"}, sender=websocket
+                        )
+                        await manager.send_personal_message(
+                            {"type": "ROOM_LOCKED"}, websocket
+                        )
 
                     elif msg_type == "UNLOCK_ROOM":
                         current_meta["is_locked"] = False
                         set_room_meta(room_id, current_meta)
-                        await manager.broadcast(room_id, {"type": "ROOM_UNLOCKED"}, sender=websocket)
-                        await manager.send_personal_message({"type": "ROOM_UNLOCKED"}, websocket)
-                        
+                        await manager.broadcast(
+                            room_id, {"type": "ROOM_UNLOCKED"}, sender=websocket
+                        )
+                        await manager.send_personal_message(
+                            {"type": "ROOM_UNLOCKED"}, websocket
+                        )
+
             except json.JSONDecodeError:
                 await websocket.send_json({"error": "Invalid JSON format"})
             except ValidationError as e:
-                await websocket.send_json({"error": "Invalid message schema", "details": e.errors()})
+                await websocket.send_json(
+                    {"error": "Invalid message schema", "details": e.errors()}
+                )
     except WebSocketDisconnect:
         manager.disconnect(room_id, websocket)
         await manager.broadcast(room_id, {"type": "user_left", "user": user_id})
+        return

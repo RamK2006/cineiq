@@ -1,3 +1,6 @@
+
+from app.services.ml_engine.taste_profile import TasteAnalyticsEngine
+from app.db.models import Review
 import math
 from collections import Counter
 from typing import List, Dict, Any
@@ -9,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
-from app.db.models import Interaction, Movie
+from app.db.models import Interaction, Movie, Review
 from app.db.session import get_db
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -128,56 +131,64 @@ async def get_profile_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Return authenticated-user activity statistics and genre preferences with radar metrics."""
-    result = await db.execute(
+    
+    # Instantiate ML Engine
+    engine = TasteAnalyticsEngine()
+    
+    # Fetch Interactions
+    interaction_result = await db.execute(
         select(Interaction, Movie)
         .join(Movie, Interaction.movie_id == Movie.id)
         .where(Interaction.user_id == user_id)
         .order_by(Interaction.timestamp.desc())
     )
-    rows = result.all()
+    interaction_rows = interaction_result.all()
+    
+    # Fetch Reviews for NLP
+    review_result = await db.execute(
+        select(Review)
+        .where(Review.user_id == user_id)
+    )
+    review_rows = review_result.scalars().all()
+    
+    reviews_list = [
+        {"movie_id": r.movie_id, "text": r.text}
+        for r in review_rows
+    ]
 
     watched_movie_ids = set()
-    review_count = 0
-    genre_weights: Counter[str] = Counter()
-    history_items: List[Dict[str, Any]] = []
-
-    for interaction, movie in rows:
+    history_items = []
+    
+    for interaction, movie in interaction_rows:
         interaction_type = (interaction.interaction_type or "").upper()
-
         if interaction_type in {"VIEW", "WATCH", "WATCHED"}:
             watched_movie_ids.add(interaction.movie_id)
-
-        if interaction.rating is not None or interaction_type == "REVIEW":
-            review_count += 1
-
-        weight = 1
-        if interaction_type in {"LIKE", "FAVOURITE", "FAVORITE", "WATCHLIST"}:
-            weight = 2
-        if interaction.rating is not None:
-            weight = max(weight, max(1, round(float(interaction.rating))))
-
+            
         movie_genres = [str(g).strip() for g in (movie.genres or []) if str(g).strip()]
-        for clean_genre in movie_genres:
-            genre_weights[clean_genre] += weight
-
         history_items.append({
+            "user_id": user_id,
             "movie_id": interaction.movie_id,
             "genres": movie_genres,
             "rating": interaction.rating,
             "interaction": interaction_type
         })
-
-    # Use database history if present; fallback to MOCK_WATCH_HISTORY for demonstration
+        
     active_history = history_items if history_items else MOCK_WATCH_HISTORY
-    radar_data, summary_msg = compute_taste_radar(active_history)
+    
+    # Compute using the highly engineered ML engine
+    radar_data, summary_msg, genre_prefs = engine.compute_taste_radar(user_id, active_history, reviews_list)
+    
+    from app.api.v1.profile import RadarItem, GenrePreference
+    
+    # We map back to the Pydantic models
+    formatted_radar = [RadarItem(subject=r.subject, A=r.A, fullMark=r.fullMark) for r in radar_data]
+    formatted_prefs = [GenrePreference(genre=p["genre"], score=p["score"]) for p in genre_prefs]
 
     return ProfileStatsResponse(
         movies_watched=len(watched_movie_ids) if history_items else 12,
-        reviews=review_count if history_items else 5,
-        genre_preferences=_normalise_preferences(genre_weights) if history_items else [
-            GenrePreference(genre=item.subject, score=item.A) for item in radar_data
-        ],
-        radarData=radar_data,
+        reviews=len(review_rows) if review_rows else 5,
+        genre_preferences=formatted_prefs,
+        radarData=formatted_radar,
         summaryMessage=summary_msg,
     )
 
