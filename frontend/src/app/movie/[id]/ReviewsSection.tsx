@@ -49,15 +49,17 @@ export default function ReviewsSection({ movieId }: { movieId: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const ownReview = useMemo(() => items.find((item) => item.is_owner), [items]);
+  const ownReview = useMemo(() => (items || []).find((item) => item.is_owner), [items]);
+
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const result = await fetchMovieReviews(movieId);
-      setItems(result.items);
-      setAverage(result.average_rating);
-      setCount(result.rating_count);
+      setItems(result?.items || []);
+      setAverage(result?.average_rating || 0);
+      setCount(result?.rating_count || 0);
+
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load reviews");
@@ -136,7 +138,8 @@ export default function ReviewsSection({ movieId }: { movieId: string }) {
       <div className="glass-panel" style={{ padding: 28 }}>
         <h2 id="reviews-heading" style={{ fontSize: 28, marginBottom: 8 }}>Ratings & Reviews</h2>
         <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
-          <strong>{average.toFixed(1)} / 5</strong> from {count} review{count === 1 ? "" : "s"}
+          <strong>{(average || 0).toFixed(1)} / 5</strong> from {count || 0} review{(count || 0) === 1 ? "" : "s"}
+
         </p>
 
         {isSignedIn ? (
@@ -158,9 +161,10 @@ export default function ReviewsSection({ movieId }: { movieId: string }) {
         ) : <p style={{ marginBottom: 24 }}>Sign in to rate and review this movie.</p>}
 
         {error && <p role="alert" style={{ color: "#ef4444" }}>{error}</p>}
-        {loading ? <p>Loading reviews…</p> : items.length === 0 ? <p>No reviews yet. Be the first.</p> : (
+        {loading ? <p>Loading reviews…</p> : (items || []).length === 0 ? <p>No reviews yet. Be the first.</p> : (
           <div style={{ display: "grid", gap: 16 }}>
-            {items.map((review) => (
+            {(items || []).map((review) => (
+
               <article key={review.id} className="glass-panel" style={{ padding: 18 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
                   <div style={{ flex: 1 }}>
