@@ -325,19 +325,37 @@ async def get_personalized_recommendations(
     page: int = Query(default=1, ge=1, le=1000, description="Page number"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get personalized recommendations using DB, SVD, and TMDB fallback."""
+    """Get personalized recommendations using Redis cache first; fall back to popularity rank for cold-start."""
     logger.info("fetch_personalized_recs", user_id=user_id, limit=limit, page=page)
 
-    # 1. First try local PostgreSQL Database
+    redis = get_redis()
+    if redis:
+        try:
+            key = f"rec:user:{user_id}"
+            cached_data = redis.get(key)
+            if cached_data:
+                logger.info("personalized_recs_cache_hit", user_id=user_id)
+                movies_list = json.loads(cached_data)
+                offset = (page - 1) * limit
+                paginated_movies = movies_list[offset : offset + limit]
+                return RecommendationResponse(
+                    algorithm="collaborative_filtering_redis",
+                    movies=[MovieItem(**m) for m in paginated_movies]
+                )
+        except Exception as e:
+            logger.error("personalized_recs_cache_fetch_failed", error=str(e))
+
+    # Cold start fallback - fetch popularity rank from PostgreSQL
     try:
         offset = (page - 1) * limit
-        stmt = select(Movie).order_by(Movie.vote_average.desc()).offset(offset).limit(limit)
+        stmt = select(Movie).order_by(Movie.popularity.desc()).offset(offset).limit(limit)
         result = await db.execute(stmt)
         db_movies = result.scalars().all()
         if db_movies:
             movies = []
             for item in db_movies:
-                match_score = round(0.7 + (item.vote_average / 10.0) * 0.28, 2)
+                match_score = round(0.65 + (item.popularity / 2000.0) * 0.33, 2)
+                match_score = min(match_score, 0.99)
                 movies.append(
                     MovieItem(
                         id=item.id,
@@ -348,50 +366,17 @@ async def get_personalized_recommendations(
                         match_score=match_score
                     )
                 )
-            return RecommendationResponse(algorithm="postgres_ncf_hybrid", movies=movies)
+            return RecommendationResponse(algorithm="popularity_rank_fallback", movies=movies)
     except Exception as e:
-        logger.warning("postgres_recommendation_fallback", error=str(e))
+        logger.warning("postgres_popularity_fallback_failed", error=str(e))
 
-    # 2. Try ML SVD Model
-    model = _get_svd_model()
-    if model is not None:
-        try:
-            ml_uid = _hash_user_id_to_ml_id(user_id)
-            predictions = []
-            for item_id in model.trainset.all_items():
-                raw_item_id = model.trainset.to_raw_iid(item_id)
-                if raw_item_id.isdigit():
-                    prediction = model.predict(ml_uid, raw_item_id)
-                    predictions.append((raw_item_id, prediction.est))
-
-            predictions.sort(key=lambda p: p[1], reverse=True)
-            
-            tasks = []
-            for item_id, estimated_rating in predictions[: limit * 3]:
-                match_score = min(estimated_rating / 5.0, 1.0)
-                tasks.append(_fetch_tmdb_movie_by_id(item_id, match_score))
-                
-            fetched_movies = await asyncio.gather(*tasks)
-            
-            movies = []
-            for movie in fetched_movies:
-                if movie:
-                    movies.append(movie)
-                    if len(movies) >= limit:
-                        break
-
-            if movies:
-                return RecommendationResponse(
-                    algorithm="svd_collaborative_filtering",
-                    movies=movies,
-                )
-        except Exception as error:
-            logger.error("svd_prediction_failed", error=str(error))
-
-    # 3. Fall back to the configured TMDB source.
+    # Ultimate fallback: fetch from TMDB popular
     movies = await _fetch_tmdb_movies("movie/popular", limit, page)
     if not movies:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Recommendations are unavailable: configure TMDB_API_KEY and populate the movie catalogue.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Recommendations are unavailable: configure TMDB_API_KEY and populate the movie catalogue."
+        )
 
     return RecommendationResponse(algorithm="cold_start_fallback", movies=movies)
 
