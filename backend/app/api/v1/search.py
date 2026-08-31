@@ -107,11 +107,42 @@ async def semantic_search(
     """
     Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.
     """
-    logger.info("semantic_search", query=q, limit=limit, genres=genres, min_rating=min_rating, year_from=year_from, year_to=year_to, sort_by=sort_by)
-    has_filters = any([genres, min_rating is not None, year_from is not None, year_to is not None])
-
-    if not settings.gemini_api_key and not settings.qdrant_url and not has_filters:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Semantic search is unavailable: configure GEMINI_API_KEY or QDRANT_URL.")
+    # Try Hybrid Search first if query is provided
+    if q:
+        try:
+            from app.services.hybrid_search import HybridSearchEngine
+            engine = HybridSearchEngine(db)
+            hybrid_results = await engine.search(q, limit=limit * 2)
+            
+            filtered_results = []
+            for movie, score in hybrid_results:
+                if genres:
+                    movie_genres = [g.lower() for g in (movie.genres or [])]
+                    if not all(g.lower() in movie_genres for g in genres):
+                        continue
+                if min_rating is not None and (movie.vote_average or 0) < min_rating:
+                    continue
+                if year_from is not None and movie.release_date and movie.release_date.year < year_from:
+                    continue
+                if year_to is not None and movie.release_date and movie.release_date.year > year_to:
+                    continue
+                
+                filtered_results.append(
+                    SearchResult(
+                        id=movie.id,
+                        title=movie.title,
+                        overview=movie.overview,
+                        poster_path=movie.poster_path,
+                        similarity_score=round(score, 5)
+                    )
+                )
+                if len(filtered_results) >= limit:
+                    break
+            
+            if filtered_results:
+                return SearchResponse(query=q, results=filtered_results)
+        except Exception as e:
+            logger.warning("hybrid_search_failed_falling_back", error=str(e))
 
     # 1. Try Qdrant vector search if enabled (skip if filters are applied)
     if settings.qdrant_url and not has_filters and q:
