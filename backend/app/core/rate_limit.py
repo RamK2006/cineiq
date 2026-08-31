@@ -25,12 +25,24 @@ def ip_whitelist_filter(request) -> bool:
         return True
     return False
 
-limiter = Limiter(
-    key_func=get_remote_address,
-    storage_uri=storage_uri,
-    storage_options=storage_options,
-    default_limits=[settings.rate_limit_global],
-    enabled=settings.rate_limit_enabled,
-    headers_enabled=True,  # X-RateLimit-* headers
-)
+try:
+    limiter = Limiter(
+        key_func=get_remote_address,
+        storage_uri=storage_uri,
+        storage_options=storage_options,
+        default_limits=[settings.rate_limit_global],
+        enabled=settings.rate_limit_enabled,
+        headers_enabled=True,  # X-RateLimit-* headers
+        request_filter=ip_whitelist_filter,
+    )
+except TypeError:
+    limiter = Limiter(
+        key_func=get_remote_address,
+        storage_uri=storage_uri,
+        storage_options=storage_options,
+        default_limits=[settings.rate_limit_global],
+        enabled=settings.rate_limit_enabled,
+        headers_enabled=True,  # X-RateLimit-* headers
+    )
+
 

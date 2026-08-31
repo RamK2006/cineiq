@@ -4,10 +4,9 @@ import uuid
 
 import structlog
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 import httpx
 from fastapi.exceptions import RequestValidationError
-import httpx
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,6 +15,8 @@ import structlog.contextvars
 
 from app.api.v1 import api_router
 from app.core.config import settings
+from app.core.security import ALLOWED_ORIGINS, CSP_DIRECTIVES, ENV
+
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from app.core.rate_limit import limiter
@@ -23,7 +24,11 @@ from app.db.models import Base
 from app.db.session import engine, AsyncSessionLocal
 from app.core.logging import log_exception
 from app.services.sync import seed_movies_if_empty
-from prometheus_fastapi_instrumentator import Instrumentator
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+except ImportError:
+    Instrumentator = None
+
 from app.core.metrics import db_query_duration_seconds
 from sqlalchemy import event
 
@@ -120,13 +125,36 @@ except Exception as _rl_err:
     import logging as _log
     _log.getLogger("uvicorn").warning(f"SlowAPI middleware disabled: {_rl_err}")
 
+# 1. Enforce strict CORS whitelist validation
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+
+# 2. Custom Security Headers Middleware for OWASP Compliance
+@app.middleware("http")
+async def add_security_headers_middleware(request: Request, call_next):
+    # Handle preflight requests cleanly
+    if request.method == "OPTIONS":
+        return await call_next(request)
+        
+    response: Response = await call_next(request)
+    
+    # Apply OWASP strict security compliance response headers
+    response.headers["Content-Security-Policy"] = CSP_DIRECTIVES
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    
+    if ENV in ("production", "prod"):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+        
+    return response
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -239,6 +267,10 @@ except Exception:
 
 app.include_router(api_router, prefix="/api/v1")
 
+from app.api.v1.room import room_websocket_signaling_endpoint
+app.websocket("/ws/room/{room_id}/{user_id}")(room_websocket_signaling_endpoint)
+
+
 # Instrument database queries via SQLAlchemy events on the sync engine
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
 def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
@@ -251,7 +283,9 @@ def after_cursor_execute(conn, cursor, statement, parameters, context, executema
         db_query_duration_seconds.observe(duration)
 
 # Instrument the FastAPI app with Prometheus metrics
-Instrumentator().instrument(app).expose(app)
+if Instrumentator:
+    Instrumentator().instrument(app).expose(app)
+
 
 @app.get("/health")
 async def health_check():

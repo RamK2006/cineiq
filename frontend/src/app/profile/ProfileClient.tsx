@@ -94,7 +94,8 @@ export default function ProfileClient() {
   }
 
   const genrePreferences = stats.genre_preferences ?? [];
-  const hasTasteProfile = genrePreferences.length > 0;
+  const hasTasteProfile = genrePreferences.length > 0 || (Boolean(stats.radarData) && (stats.radarData?.length ?? 0) > 0);
+
 
   return (
     <main style={{ minHeight: '100vh', padding: '100px 5% 40px' }}>
@@ -155,18 +156,26 @@ export default function ProfileClient() {
               <>
                 <div style={{ height: '300px', width: '100%' }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={genrePreferences}>
+                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={
+                      stats.radarData && stats.radarData.length > 0
+                        ? stats.radarData
+                        : genrePreferences.map(gp => ({ subject: gp.genre, A: gp.score, fullMark: 100 }))
+                    }>
                       <PolarGrid stroke="rgba(255,255,255,0.1)" />
-                      <PolarAngleAxis dataKey="genre" tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} />
+                      <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} />
                       <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                      <Radar name="Taste" dataKey="score" stroke="var(--accent-secondary)" fill="var(--accent-secondary)" fillOpacity={0.4} />
+                      <Radar name="Taste Density" dataKey="A" stroke="var(--accent-secondary)" fill="var(--accent-secondary)" fillOpacity={0.4} />
                     </RadarChart>
                   </ResponsiveContainer>
                 </div>
-                <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '14px', marginTop: '16px' }}>
-                  Your strongest movie preference is {genrePreferences[0].genre}.
-                </p>
+                <div style={{ marginTop: '20px', padding: '16px', borderRadius: '12px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <h3 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '6px' }}>Automated Discovery Recommendation</h3>
+                  <p style={{ color: 'white', fontSize: '14px', lineHeight: '1.5', margin: 0 }}>
+                    {stats.summaryMessage || `Your strongest movie preference is ${genrePreferences[0]?.genre}.`}
+                  </p>
+                </div>
               </>
+
             ) : (
               <div style={{ textAlign: 'center', padding: '60px 20px' }}>
                 <h3 style={{ marginBottom: '10px' }}>Complete your profile</h3>

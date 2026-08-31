@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, Maximize, Volume2, Users, MoreVertical, Lock, Unlock, LogOut } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
+import VoiceMeshOverlay from '@/components/VoiceMeshOverlay';
+
 
 export default function RoomClient() {
   const params = useParams();
@@ -37,6 +39,201 @@ export default function RoomClient() {
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const expectedDisconnect = useRef<boolean>(false);
+
+  // Realtime WebRTC Voice Mesh state & refs
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [peerStreams, setPeerStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [cameraActive, setCameraActive] = useState(true);
+  const [micActive, setMicActive] = useState(true);
+
+  const meshWsRef = useRef<WebSocket | null>(null);
+  const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const localUserIdRef = useRef<string>(user?.id || `user_${Math.floor(Math.random() * 10000)}`);
+
+  const initializeMeshWebSocket = useCallback((stream: MediaStream | null) => {
+    if (typeof window === 'undefined') return;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const configuredUrl = process.env.NEXT_PUBLIC_WS_URL;
+    let wsUrl = `${protocol}//${host}/ws/room/${roomId}/${localUserIdRef.current}`;
+    if (configuredUrl) {
+      const wsBase = configuredUrl.replace(/\/$/, '');
+      wsUrl = `${wsBase}/room/ws/room/${roomId}/${localUserIdRef.current}`;
+    }
+
+    meshWsRef.current = new WebSocket(wsUrl);
+
+    meshWsRef.current.onmessage = async (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        const { type, peerId, senderId, data } = message;
+
+        switch (type) {
+          case 'peer-joined':
+            createNewPeerConnection(peerId, stream, true);
+            break;
+          case 'offer':
+            const pcOffer = createNewPeerConnection(senderId, stream, false);
+            await pcOffer.setRemoteDescription(new RTCSessionDescription(data));
+            const answer = await pcOffer.createAnswer();
+            await pcOffer.setLocalDescription(answer);
+            meshWsRef.current?.send(JSON.stringify({ type: 'answer', data: answer }));
+            break;
+          case 'answer':
+            const pcAnswer = peersRef.current.get(senderId);
+            await pcAnswer?.setRemoteDescription(new RTCSessionDescription(data));
+            break;
+          case 'ice-candidate':
+            const pcCandidate = peersRef.current.get(senderId);
+            await pcCandidate?.addIceCandidate(new RTCIceCandidate(data));
+            break;
+          case 'peer-left':
+            removePeer(peerId);
+            break;
+        }
+      } catch (err) {
+        console.error("WebRTC mesh signaling frame parse error:", err);
+      }
+    };
+  }, [roomId]);
+
+  const createNewPeerConnection = useCallback((targetPeerId: string, stream: MediaStream | null, initiateOffer: boolean) => {
+    if (peersRef.current.has(targetPeerId)) {
+      peersRef.current.get(targetPeerId)?.close();
+    }
+
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    });
+
+    peersRef.current.set(targetPeerId, pc);
+
+    if (stream) {
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    }
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        meshWsRef.current?.send(JSON.stringify({ type: 'ice-candidate', data: e.candidate }));
+      }
+    };
+
+    pc.ontrack = (e) => {
+      if (e.streams && e.streams[0]) {
+        setPeerStreams(prev => {
+          const next = new Map(prev);
+          next.set(targetPeerId, e.streams[0]);
+          return next;
+        });
+      }
+    };
+
+    if (initiateOffer) {
+      pc.createOffer().then(async (offer) => {
+        await pc.setLocalDescription(offer);
+        meshWsRef.current?.send(JSON.stringify({ type: 'offer', data: offer }));
+      }).catch(err => console.error("Error creating RTC offer:", err));
+    }
+
+    return pc;
+  }, []);
+
+  const removePeer = useCallback((targetPeerId: string) => {
+    const pc = peersRef.current.get(targetPeerId);
+    if (pc) {
+      pc.close();
+      peersRef.current.delete(targetPeerId);
+    }
+    setPeerStreams(prev => {
+      const next = new Map(prev);
+      next.delete(targetPeerId);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    let currentStream: MediaStream | null = null;
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+          currentStream = stream;
+          setLocalStream(stream);
+          initializeMeshWebSocket(stream);
+        })
+        .catch((err) => {
+          console.warn("Media capture fallback:", err);
+          initializeMeshWebSocket(null);
+        });
+    } else {
+      initializeMeshWebSocket(null);
+    }
+
+    const handleBeforeUnload = () => {
+      meshWsRef.current?.close();
+      peersRef.current.forEach(pc => pc.close());
+      currentStream?.getTracks().forEach(track => track.stop());
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      meshWsRef.current?.close();
+      peersRef.current.forEach(pc => pc.close());
+      currentStream?.getTracks().forEach(track => track.stop());
+    };
+  }, [roomId, initializeMeshWebSocket]);
+
+  const toggleCamera = () => {
+    if (localStream) {
+      localStream.getVideoTracks().forEach(track => {
+        track.enabled = !cameraActive;
+      });
+      setCameraActive(!cameraActive);
+    }
+  };
+
+  const toggleMic = () => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => {
+        track.enabled = !micActive;
+      });
+      setMicActive(!micActive);
+    }
+  };
+
+  const handleSelectDevice = async (kind: 'videoinput' | 'audioinput', deviceId: string) => {
+    try {
+      const constraints: MediaStreamConstraints = {};
+      if (kind === 'videoinput') constraints.video = { deviceId: { exact: deviceId } };
+      if (kind === 'audioinput') constraints.audio = { deviceId: { exact: deviceId } };
+
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const newTrack = kind === 'videoinput' ? newStream.getVideoTracks()[0] : newStream.getAudioTracks()[0];
+      
+      if (newTrack && localStream) {
+        const oldTrack = kind === 'videoinput' ? localStream.getVideoTracks()[0] : localStream.getAudioTracks()[0];
+        if (oldTrack) {
+          localStream.removeTrack(oldTrack);
+          oldTrack.stop();
+        }
+        localStream.addTrack(newTrack);
+
+        peersRef.current.forEach((pc) => {
+          const sender = pc.getSenders().find(s => s.track?.kind === (kind === 'videoinput' ? 'video' : 'audio'));
+          if (sender) {
+            sender.replaceTrack(newTrack);
+          }
+        });
+      }
+    } catch (err) {
+      console.error("Failed to switch media device:", err);
+    }
+  };
+
 
   const connectWebSocket = useCallback(async () => {
     if (expectedDisconnect.current) return;
@@ -297,6 +494,20 @@ export default function RoomClient() {
                 </button>
             </div>
         )}
+
+        {/* Floating Voice Mesh Peer Overlay */}
+        <div style={{ position: 'absolute', top: 20, right: 340, zIndex: 50, maxWidth: '320px' }}>
+          <VoiceMeshOverlay
+            localStream={localStream}
+            peerStreams={peerStreams}
+            cameraActive={cameraActive}
+            micActive={micActive}
+            onToggleCamera={toggleCamera}
+            onToggleMic={toggleMic}
+            onSelectDevice={handleSelectDevice}
+          />
+        </div>
+
 
         <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: '#111827', color: 'var(--text-secondary)' }}>
           No licensed playback source is configured for this room.
