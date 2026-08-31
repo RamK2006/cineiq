@@ -96,6 +96,27 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
                 decode_kwargs["options"] = {"verify_aud": False}
 
             payload = jwt.decode(token, public_key, **decode_kwargs)
+
+            # Replay protection and window validation (with leeway for clock skew)
+            now = time.time()
+            leeway = 5.0
+            
+            iat = payload.get("iat")
+            if iat is not None and iat > (now + leeway):
+                logger.warning("jwt_iat_in_future", iat=iat, now=now)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token issued in the future"
+                )
+                
+            exp = payload.get("exp")
+            if exp is not None and exp < (now - leeway):
+                logger.warning("jwt_expired", exp=exp, now=now)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token has expired"
+                )
+
             return payload
 
     except Exception as e:

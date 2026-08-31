@@ -30,7 +30,7 @@ jobs:
 
       - name: Lint backend with Ruff
         run: |
-          ruff check backend
+          python -m ruff check backend
 
       - name: Run backend tests with Pytest
         run: |
