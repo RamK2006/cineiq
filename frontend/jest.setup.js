@@ -33,6 +33,7 @@ let mockParams = { id: '1' };
 jest.mock('next/navigation', () => ({
   usePathname: () => mockPathname,
   useParams: () => mockParams,
+  useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({
     push: mockPush,
     replace: mockReplace,
@@ -40,6 +41,7 @@ jest.mock('next/navigation', () => ({
     back: mockBack,
   }),
 }));
+
 
 global.mockNavigation = {
   push: mockPush,

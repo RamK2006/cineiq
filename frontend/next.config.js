@@ -2,6 +2,18 @@ if (process.env.NODE_ENV !== 'production') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
+let withPWA;
+try {
+  withPWA = require('next-pwa')({
+    dest: 'public',
+    register: true,
+    skipWaiting: true,
+    disable: process.env.NODE_ENV === 'development',
+  });
+} catch (e) {
+  withPWA = (config) => config;
+}
+
 /** @type {import('next').NextConfig} */
 
 const nextConfig = {
@@ -67,5 +79,5 @@ const nextConfig = {
   }
 };
 
+module.exports = withPWA(nextConfig);
 
-module.exports = nextConfig;

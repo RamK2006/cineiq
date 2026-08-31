@@ -5,7 +5,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 import json
 import hashlib
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import or_, and_, cast, String, extract
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +37,14 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     results: List[SearchResult]
+
+
+class SuggestItem(BaseModel):
+    id: str
+    title: str
+    poster_path: Optional[str] = None
+    year: Optional[int] = None
+
 
 
 async def extract_keywords_with_gemini(query: str) -> str:
@@ -92,7 +100,49 @@ async def extract_keywords_with_gemini(query: str) -> str:
     return sanitized
 
 
+@router.get("/suggest", response_model=List[SuggestItem])
+async def suggest_search(
+    q: str = Query("", description="Prefix search query for instant suggestions"),
+    limit: int = Query(5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Lightweight auto-complete suggestions endpoint using SQL prefix search (LIKE 'q%').
+    Returns top `limit` matches with id, title, poster_path, and release year.
+    """
+    cleaned_q = sanitize_query(q).strip()
+    if not cleaned_q:
+        return []
+
+    try:
+        stmt = (
+            select(Movie)
+            .where(Movie.title.ilike(f"{cleaned_q}%"))
+            .order_by(Movie.popularity.desc())
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        movies = result.scalars().all()
+
+        suggestions = []
+        for movie in movies:
+            release_year = movie.release_date.year if movie.release_date else None
+            suggestions.append(
+                SuggestItem(
+                    id=movie.id,
+                    title=movie.title,
+                    poster_path=movie.poster_path,
+                    year=release_year,
+                )
+            )
+        return suggestions
+    except Exception as e:
+        logger.warning("suggest_search_db_failed", error=str(e))
+        return []
+
+
 @router.get("/semantic", response_model=SearchResponse)
+
 async def semantic_search(
     request: Request,
     q: str = Query("", description="Natural language search query"),
@@ -107,8 +157,10 @@ async def semantic_search(
     """
     Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.
     """
+    has_filters = bool(genres or min_rating is not None or year_from is not None or year_to is not None)
     # Try Hybrid Search first if query is provided
     if q:
+
         try:
             from app.services.hybrid_search import HybridSearchEngine
             engine = HybridSearchEngine(db)

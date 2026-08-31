@@ -54,3 +54,32 @@ def test_search_with_only_filters_succeeds():
         data = response.json()
         assert "query" in data
         assert "results" in data
+
+
+def test_suggest_endpoint_empty_query():
+    """Verify that suggest endpoint returns empty list for empty query."""
+    with TestClient(app) as client:
+        response = client.get("/api/v1/search/suggest?q=")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 0
+
+
+def test_suggest_endpoint_with_query():
+    """Verify that suggest endpoint returns list of suggestions matching prefix."""
+    with TestClient(app) as client:
+        response = client.get("/api/v1/search/suggest?q=Inter&limit=5")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) >= 1
+        suggestion = data[0]
+        assert "id" in suggestion
+        assert "title" in suggestion
+        assert "poster_path" in suggestion
+        assert "year" in suggestion
+        assert suggestion["title"].startswith("Inter")
+
+
+

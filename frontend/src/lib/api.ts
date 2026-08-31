@@ -112,6 +112,11 @@ export async function fetchPersonalizedMovies(limit: number = 20): Promise<Recom
   return apiRequest(`/recommend/personalized?limit=${limit}`);
 }
 
+export async function fetchMoviesByEmotion(emotion: string, limit: number = 10): Promise<RecommendationResponse> {
+  return apiRequest(`/recommend/by-emotion?emotion=${encodeURIComponent(emotion)}&limit=${limit}`);
+}
+
+
 export async function fetchProfileStats(token: string): Promise<ProfileStats> {
   const response = await fetch(`${API_BASE_URL}/profile/stats`, {
     method: 'GET',
@@ -184,5 +189,21 @@ export function voteMovieReview(
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ vote_type: voteType }),
   });
+}
+
+export async function trackAnalyticsEvent(payload: {
+  event_type: 'view' | 'click' | 'trailer_play';
+  movie_id: string;
+  source?: string;
+  user_id?: string;
+}) {
+  return apiRequest('/analytics/event', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchTopClickedMovies(hours = 24, limit = 10) {
+  return apiRequest(`/analytics/top-clicked?hours=${hours}&limit=${limit}`);
 }
 
