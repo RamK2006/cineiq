@@ -23,6 +23,70 @@ in_memory_messages: Dict[str, list] = {}
 in_memory_meta: Dict[str, dict] = {}
 in_memory_state: Dict[str, dict] = {}
 
+# Tracks connected WebSocket instances for WebRTC mesh signaling by room ID
+# Structure: { room_id: { user_id: WebSocket } }
+ROOM_SIGNALING_REGISTRY: Dict[str, Dict[str, WebSocket]] = {}
+
+async def broadcast_to_room_peers(room_id: str, sender_id: str, message: dict):
+    """Dispatches a signal packet to all other connected nodes in the room mesh."""
+    if room_id in ROOM_SIGNALING_REGISTRY:
+        for peer_id, client_ws in list(ROOM_SIGNALING_REGISTRY[room_id].items()):
+            if peer_id != sender_id:
+                try:
+                    await client_ws.send_text(json.dumps(message))
+                except Exception as e:
+                    logger.error(f"Signaling dispatch failed from {sender_id} to {peer_id}: {str(e)}")
+
+@router.websocket("/ws/room/{room_id}/{user_id}")
+@router.websocket("/ws/mesh/{room_id}/{user_id}")
+async def room_websocket_signaling_endpoint(websocket: WebSocket, room_id: str, user_id: str):
+    await websocket.accept()
+    
+    if room_id not in ROOM_SIGNALING_REGISTRY:
+        ROOM_SIGNALING_REGISTRY[room_id] = {}
+        
+    # Enforce mesh participant limit guardrail (Up to 4 people max)
+    if len(ROOM_SIGNALING_REGISTRY[room_id]) >= 4:
+        await websocket.close(code=4001, reason="Watch Party room mesh capacity full.")
+        return
+
+    ROOM_SIGNALING_REGISTRY[room_id][user_id] = websocket
+    logger.info(f"[MESH JOIN] User {user_id} attached to room matrix {room_id}")
+
+    # Notify existing nodes to initialize WebRTC link configurations
+    await broadcast_to_room_peers(room_id, user_id, {
+        "type": "peer-joined",
+        "peerId": user_id
+    })
+
+    try:
+        while True:
+            raw_data = await websocket.receive_text()
+            payload = json.loads(raw_data)
+            
+            # Forward WebRTC signaling envelopes (offer, answer, candidate) cleanly
+            target_type = payload.get("type")
+            if target_type in ["offer", "answer", "ice-candidate"]:
+                await broadcast_to_room_peers(room_id, user_id, {
+                    "type": target_type,
+                    "senderId": user_id,
+                    "data": payload.get("data")
+                })
+    except WebSocketDisconnect:
+        logger.info(f"[MESH DISCONNECT] User {user_id} disconnected from room {room_id}")
+    finally:
+        if room_id in ROOM_SIGNALING_REGISTRY and user_id in ROOM_SIGNALING_REGISTRY[room_id]:
+            del ROOM_SIGNALING_REGISTRY[room_id][user_id]
+            if not ROOM_SIGNALING_REGISTRY[room_id]:
+                del ROOM_SIGNALING_REGISTRY[room_id]
+                
+        # Alert remaining peers to cleanly dismantle connections
+        await broadcast_to_room_peers(room_id, user_id, {
+            "type": "peer-left",
+            "peerId": user_id
+        })
+
+
 class WSMessage(BaseModel):
     type: Literal["play", "pause", "seek", "chat", "submit_passcode", "TRANSFER_HOST", "KICK_USER", "MUTE_USER", "LOCK_ROOM", "UNLOCK_ROOM"]
     payload: Optional[Any] = None
@@ -44,8 +108,8 @@ class ConnectionManager:
 
         await websocket.accept()
         if room_id not in self.active_connections:
-            self.active_connections[room_id] = set()
-        self.active_connections[room_id].add(websocket)
+            self.active_connections[room_id] = {}
+        self.active_connections[room_id][websocket] = user_id
         websocket_connected_clients.inc()
         logger.info("ws_client_connected", room_id=room_id)
         return True
@@ -53,11 +117,12 @@ class ConnectionManager:
     def disconnect(self, room_id: str, websocket: WebSocket):
         if room_id in self.active_connections:
             if websocket in self.active_connections[room_id]:
-                self.active_connections[room_id].discard(websocket)
+                del self.active_connections[room_id][websocket]
                 websocket_connected_clients.dec()
             if not self.active_connections[room_id]:
                 del self.active_connections[room_id]
         logger.info("ws_client_disconnected", room_id=room_id)
+
 
     async def broadcast(self, room_id: str, message: dict, sender: WebSocket = None):
         if room_id in self.active_connections:

@@ -109,3 +109,18 @@ class Review(Base):
         CheckConstraint("rating >= 1 AND rating <= 5", name="ck_reviews_rating_range"),
         UniqueConstraint("user_id", "movie_id", name="uq_reviews_user_movie"),
     )
+
+
+class ReviewVote(Base):
+    __tablename__ = "review_votes"
+
+    id = Column(String, primary_key=True, default=_generate_uuid)
+    user_id = Column(String, index=True, nullable=False)
+    review_id = Column(String, ForeignKey("reviews.id", ondelete="CASCADE"), nullable=False, index=True)
+    vote_type = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "review_id", name="uq_user_review_vote"),
+    )
+
