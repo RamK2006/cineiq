@@ -5,7 +5,9 @@ import uuid
 import structlog
 
 from fastapi import FastAPI, Request
+import httpx
 from fastapi.exceptions import RequestValidationError
+import httpx
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -34,10 +36,14 @@ def get_request_id(request: Request) -> str:
     """Return the request's correlation ID, generating one only as a fallback."""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
+def get_http_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.http_client
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    app.state.http_client = httpx.AsyncClient(timeout=10.0)
     logger.info("cineiq_starting", host=settings.backend_host, port=settings.backend_port)
     try:
         async with engine.begin() as conn:
@@ -66,18 +72,36 @@ async def lifespan(app: FastAPI):
             message="GEMINI_API_KEY is not set; keyword extraction will be skipped.",
         )
 
+    # Create a shared httpx.AsyncClient for reuse across requests
+    try:
+        app.state.http_client = httpx.AsyncClient(timeout=10.0)
+        logger.info("shared_httpx_client_created", timeout_seconds=10)
+    except Exception as e:
+        logger.error("httpx_client_creation_failed", error=str(e))
+        app.state.http_client = None
+
     # Load the TMDB movie genre map once so recommendation responses can
     # resolve genre IDs without making an extra request for every movie.
     try:
         from app.api.v1.recommend import initialize_tmdb_genres
 
-        await initialize_tmdb_genres()
+        await initialize_tmdb_genres(app.state.http_client)
     except Exception as e:
         logger.error("tmdb_genre_initialization_failed", error=str(e))
 
     yield
     # Shutdown
+    if hasattr(app.state, "http_client"):
+        await app.state.http_client.aclose()
     logger.info("cineiq_stopped")
+    # Close shared httpx client if created
+    try:
+        if getattr(app.state, "http_client", None) is not None:
+            await app.state.http_client.aclose()
+            logger.info("shared_httpx_client_closed")
+    except Exception as e:
+        logger.error("httpx_client_close_failed", error=str(e))
+
     await engine.dispose()
 
 app = FastAPI(
@@ -194,6 +218,13 @@ try:
     @app.exception_handler(RateLimitExceeded)
     async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
         request_id = get_request_id(request)
+        retry_after = "60"
+        if hasattr(exc, "retry_after") and exc.retry_after is not None:
+            retry_after = str(int(exc.retry_after))
+        elif hasattr(exc, "limit") and exc.limit is not None:
+            # Fallback based on limit value
+            retry_after = "60"
+        
         return JSONResponse(
             status_code=429,
             content={
@@ -201,6 +232,7 @@ try:
                 "error_code": "RATE_LIMIT_EXCEEDED",
                 "request_id": request_id,
             },
+            headers={"Retry-After": retry_after}
         )
 except Exception:
     pass
