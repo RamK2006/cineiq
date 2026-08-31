@@ -95,6 +95,3 @@ async def test_search_suggest_async(async_client):
         assert "title" in data[0]
 
 
-
-
-

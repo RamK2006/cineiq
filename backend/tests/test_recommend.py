@@ -44,6 +44,18 @@ class RecommendationHelpersTests(unittest.TestCase):
             ["Unknown"],
         )
 
+    def test_by_emotion_endpoint(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        with TestClient(app) as client:
+            response = client.get("/api/v1/recommend/by-emotion?emotion=Tense&limit=5")
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertIn("algorithm", data)
+            self.assertIn("movies", data)
+            self.assertIsInstance(data["movies"], list)
+
 
 @pytest.mark.asyncio
 async def test_recommend_trending_async(async_client):
@@ -59,6 +71,4 @@ async def test_recommend_trending_async(async_client):
 
 if __name__ == "__main__":
     unittest.main()
-
-
 

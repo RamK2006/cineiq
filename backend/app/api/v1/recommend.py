@@ -491,3 +491,54 @@ async def get_trending_movies(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Trending movies are unavailable: configure TMDB_API_KEY and populate the movie catalogue.")
 
     return RecommendationResponse(algorithm="trending_fallback", movies=movies)
+
+
+@router.get(
+    "/by-emotion",
+    response_model=RecommendationResponse,
+)
+async def get_recommendations_by_emotion(
+    emotion: str = Query(..., description="Emotion/mood to filter by e.g. Tense, Adrenaline, Mind-Bending, Feel-Good"),
+    limit: int = Query(10, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get movie recommendations filtered by dominant_emotion sorted by popularity.
+    """
+    logger.info("fetch_recs_by_emotion", emotion=emotion, limit=limit)
+    clean_emotion = emotion.strip()
+
+    try:
+        stmt = (
+            select(Movie)
+            .where(Movie.dominant_emotion.ilike(f"%{clean_emotion}%"))
+            .order_by(Movie.popularity.desc())
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        db_movies = result.scalars().all()
+
+        if not db_movies:
+            stmt = select(Movie).order_by(Movie.popularity.desc()).limit(limit)
+            result = await db.execute(stmt)
+            db_movies = result.scalars().all()
+
+        movies = [
+            MovieItem(
+                id=item.id,
+                title=item.title,
+                poster_path=item.poster_path,
+                vote_average=item.vote_average,
+                genres=item.genres or ["Movie"],
+                match_score=min(round(0.70 + (item.popularity / 2000.0) * 0.28, 2), 0.99),
+            )
+            for item in db_movies
+        ]
+        return RecommendationResponse(
+            algorithm=f"emotion_filter_{clean_emotion.lower()}",
+            movies=movies,
+        )
+    except Exception as e:
+        logger.warning("by_emotion_query_failed", error=str(e))
+        return RecommendationResponse(algorithm="emotion_fallback", movies=[])
+
