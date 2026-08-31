@@ -6,6 +6,8 @@ import { Play, Pause, Maximize, Volume2, Users, MoreVertical, Lock, Unlock, LogO
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
 import VoiceMeshOverlay from '@/components/VoiceMeshOverlay';
+import { usePushToTalk } from '@/hooks/usePushToTalk';
+import { VoiceStatus } from '@/hooks/useAudioAnalyzer';
 
 
 export default function RoomClient() {
@@ -44,7 +46,19 @@ export default function RoomClient() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [peerStreams, setPeerStreams] = useState<Map<string, MediaStream>>(new Map());
   const [cameraActive, setCameraActive] = useState(true);
-  const [micActive, setMicActive] = useState(true);
+  const [micActive, setMicActive] = useState(false); // Default to false
+  const [voiceStates, setVoiceStates] = useState<Record<string, VoiceStatus>>({});
+  
+  const { isPttActive, shortcutKey, changeShortcut } = usePushToTalk('v');
+  
+  // Update local microphone track enablement whenever micActive or PTT changes
+  useEffect(() => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => {
+        track.enabled = micActive || isPttActive;
+      });
+    }
+  }, [localStream, micActive, isPttActive]);
 
   const meshWsRef = useRef<WebSocket | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -197,13 +211,15 @@ export default function RoomClient() {
   };
 
   const toggleMic = () => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-        track.enabled = !micActive;
-      });
-      setMicActive(!micActive);
-    }
+    setMicActive(!micActive);
   };
+
+  const handleVoiceStatusChange = useCallback((peerId: string, status: VoiceStatus) => {
+    setVoiceStates(prev => {
+      if (prev[peerId] === status) return prev;
+      return { ...prev, [peerId]: status };
+    });
+  }, []);
 
   const handleSelectDevice = async (kind: 'videoinput' | 'audioinput', deviceId: string) => {
     try {
@@ -501,10 +517,13 @@ export default function RoomClient() {
             localStream={localStream}
             peerStreams={peerStreams}
             cameraActive={cameraActive}
-            micActive={micActive}
+            micActive={micActive || isPttActive}
             onToggleCamera={toggleCamera}
             onToggleMic={toggleMic}
             onSelectDevice={handleSelectDevice}
+            onVoiceStatusChange={handleVoiceStatusChange}
+            shortcutKey={shortcutKey}
+            onChangeShortcut={changeShortcut}
           />
         </div>
 
@@ -560,7 +579,16 @@ export default function RoomClient() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '150px', overflowY: 'auto' }}>
             {participants.map(p => (
-              <ParticipantItem key={p} userId={p} isHost={isHost} roomHostId={hostId} isMuted={mutedUsers.includes(p)} currentUserId={currentUserId} ws={ws.current} />
+              <ParticipantItem 
+                key={p} 
+                userId={p} 
+                isHost={isHost} 
+                roomHostId={hostId} 
+                isMuted={mutedUsers.includes(p)} 
+                currentUserId={currentUserId} 
+                ws={ws.current} 
+                voiceStatus={voiceStates[p === currentUserId ? 'You' : p]}
+              />
             ))}
           </div>
         </div>
@@ -597,7 +625,7 @@ export default function RoomClient() {
 }
 
 // Subcomponent for participant to isolate dropdown state
-function ParticipantItem({ userId, isHost, roomHostId, isMuted, currentUserId, ws }: { userId: string, isHost: boolean, roomHostId: string | null, isMuted: boolean, currentUserId: string, ws: WebSocket | null }) {
+function ParticipantItem({ userId, isHost, roomHostId, isMuted, currentUserId, ws, voiceStatus }: { userId: string, isHost: boolean, roomHostId: string | null, isMuted: boolean, currentUserId: string, ws: WebSocket | null, voiceStatus?: VoiceStatus }) {
     const [showMenu, setShowMenu] = useState(false);
     
     const isThisUserHost = userId === roomHostId;
@@ -614,11 +642,16 @@ function ParticipantItem({ userId, isHost, roomHostId, isMuted, currentUserId, w
 
     return (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', position: 'relative' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: '13px', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>
                     {userId} {isMe && '(You)'}
                 </span>
                 {isThisUserHost && <span style={{ fontSize: '10px', background: 'var(--accent-primary)', padding: '2px 6px', borderRadius: '4px', color: 'white' }}>Host</span>}
+                
+                {voiceStatus === 'muted' && <span className="text-[10px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded" aria-label="Muted">Muted</span>}
+                {voiceStatus === 'active' && <span className="text-[10px] bg-slate-500/20 text-slate-300 px-1.5 py-0.5 rounded" aria-label="Active microphone">Active</span>}
+                {voiceStatus === 'speaking' && <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded animate-pulse" aria-label="Speaking">Speaking</span>}
+                
                 {isMuted && <Volume2 size={12} color="#ef4444" />}
             </div>
             
