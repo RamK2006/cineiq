@@ -1,7 +1,8 @@
 import re
 import httpx
 import structlog
-from typing import List, Optional
+from typing import List, Optional, Dict
+
 from pydantic import BaseModel
 import json
 import hashlib
