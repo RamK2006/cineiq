@@ -34,6 +34,9 @@ export default function RoomClient() {
   const [members, setMembers] = useState<{userId: string, username: string, avatar: string}[]>([]);
   const [reactions, setReactions] = useState<{id: number, emoji: string}[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [networkOffset, setNetworkOffset] = useState<number>(0);
+  const [hostStatus, setHostStatus] = useState<string>('');
+
   
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -335,11 +338,27 @@ export default function RoomClient() {
     
     ws.current = new WebSocket(wsUrl);
 
+    
     ws.current.onopen = () => {
       console.log('Connected to WS');
       setConnectionStatus('connected');
       if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+      
+      // Start NTP Clock Sync Loop
+      const pingInterval = setInterval(() => {
+        if (ws.current?.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({ type: 'PING', payload: { client_time: Date.now() } }));
+        }
+      }, 5000);
+      
+      // Cleanup on close
+      const oldOnClose = ws.current.onclose;
+      ws.current.onclose = (e) => {
+        clearInterval(pingInterval);
+        if (oldOnClose) oldOnClose(e);
+      };
     };
+
 
     ws.current.onmessage = (event) => {
       try {
@@ -350,6 +369,44 @@ export default function RoomClient() {
         }
         
         switch (message.type) {
+          case 'PONG':
+            if (message.payload) {
+              const rtt = Date.now() - message.payload.client_time;
+              const serverTime = message.payload.server_time;
+              const newOffset = serverTime - (Date.now() - rtt / 2);
+              setNetworkOffset(prev => (prev * 0.8) + (newOffset * 0.2)); // Smooth the offset
+            }
+            break;
+          case 'SYNC_TIME':
+            if (message.payload) {
+                const { server_time, progress: sProgress, action, state_timestamp } = message.payload;
+                const now = Date.now();
+                const currentServerTime = now + networkOffset;
+                
+                let expectedProgress = sProgress;
+                if (action === 'play') {
+                    const elapsed = (currentServerTime - state_timestamp) / 1000;
+                    expectedProgress += elapsed;
+                    setIsPlaying(true);
+                    setHostStatus('Playing');
+                } else {
+                    setIsPlaying(false);
+                    setHostStatus('Paused');
+                }
+                
+                // If drifted by more than 0.3s, seek
+                setProgress(prev => {
+                    if (Math.abs(prev - expectedProgress) > 0.3) {
+                        return expectedProgress;
+                    }
+                    return prev;
+                });
+            }
+            break;
+          case 'HOST_ACTION_DENIED':
+            console.warn("Host Action Denied:", message.error);
+            break;
+
           case 'PASSCODE_REQUIRED':
             setShowPasscodeModal(true);
             setPasscodeError('');
@@ -464,6 +521,13 @@ export default function RoomClient() {
       if (ws.current) ws.current.close();
     };
   }, [connectWebSocket]);
+
+  
+  const requestSync = useCallback(() => {
+      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({ type: 'REQUEST_SYNC', payload: {} }));
+      }
+  }, []);
 
   const emitSync = useCallback((action: 'play' | 'pause' | 'seek', newProgress?: number) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
@@ -755,7 +819,19 @@ export default function RoomClient() {
             <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent-primary)', borderRadius: '2px', transition: 'width 0.1s' }} />
           </div>
 
+          
           <span style={{ fontFamily: 'var(--font-body)', fontSize: '14px' }}>00:00 / 02:45:00</span>
+          
+          <button onClick={requestSync} title="Request Resync" style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer' }}>
+            Sync
+          </button>
+          
+          {hostStatus && (
+             <span style={{ fontSize: '12px', color: 'var(--accent-primary)', marginLeft: '8px' }}>
+                Host: {hostStatus}
+             </span>
+          )}
+
           
           <button aria-label="Adjust volume" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
             <Volume2 size={20} />
