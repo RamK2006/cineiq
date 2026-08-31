@@ -191,3 +191,20 @@ export function voteMovieReview(
   });
 }
 
+export async function trackAnalyticsEvent(payload: {
+  event_type: 'view' | 'click' | 'trailer_play';
+  movie_id: string;
+  source?: string;
+  user_id?: string;
+}) {
+  return apiRequest('/analytics/event', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchTopClickedMovies(hours = 24, limit = 10) {
+  return apiRequest(`/analytics/top-clicked?hours=${hours}&limit=${limit}`);
+}
+
+
