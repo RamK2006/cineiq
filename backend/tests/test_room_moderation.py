@@ -1,9 +1,6 @@
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 from fastapi.testclient import TestClient
-from fastapi.websockets import WebSocket
-import json
-import uuid
 
 from app.main import app
 from app.api.v1.room import get_room_meta, set_room_meta, manager, in_memory_meta, hash_passcode, verify_passcode, in_memory_messages, in_memory_state
@@ -66,8 +63,10 @@ def test_websocket_moderation(mock_verify):
     with client.websocket_connect(f"/api/v1/room/ws/{room_id}?token={host_id}") as host_ws:
         # Host receives initial state
         msg = host_ws.receive_json()
-        if msg["type"] == "sync": msg = host_ws.receive_json() # skip sync
-        if msg["type"] == "history": msg = host_ws.receive_json() # skip history
+        if msg["type"] == "sync":
+            msg = host_ws.receive_json()
+        if msg["type"] == "history":
+            msg = host_ws.receive_json()
         assert msg["type"] == "room_state"
         assert msg["payload"]["host_id"] == host_id
         
@@ -75,8 +74,10 @@ def test_websocket_moderation(mock_verify):
         with client.websocket_connect(f"/api/v1/room/ws/{room_id}?token={user_id}") as user_ws:
             # User receives initial state
             msg = user_ws.receive_json()
-            if msg["type"] == "sync": msg = user_ws.receive_json()
-            if msg["type"] == "history": msg = user_ws.receive_json()
+            if msg["type"] == "sync":
+                msg = user_ws.receive_json()
+            if msg["type"] == "history":
+                msg = user_ws.receive_json()
             assert msg["type"] == "room_state"
             assert msg["payload"]["host_id"] == host_id
             
@@ -119,7 +120,7 @@ def test_websocket_moderation(mock_verify):
             
             # Test 6: New host kicks old host
             user_ws.send_json({"type": "KICK_USER", "payload": {"user_id": host_id}})
-            msg = host_ws.receive_json()
+            msg = user_ws.receive_json()
             assert msg["type"] == "USER_KICKED"
             
             # New host should get user_left
@@ -148,8 +149,10 @@ def test_websocket_locked_room(mock_verify):
     # Host can connect without passcode
     with client.websocket_connect(f"/api/v1/room/ws/{room_id}?token={host_id}") as host_ws:
         msg = host_ws.receive_json()
-        if msg["type"] == "sync": msg = host_ws.receive_json()
-        if msg["type"] == "history": msg = host_ws.receive_json()
+        if msg["type"] == "sync":
+            msg = host_ws.receive_json()
+        if msg["type"] == "history":
+            msg = host_ws.receive_json()
         assert msg["type"] == "room_state"
 
     # User connects and gets prompted for passcode
@@ -169,6 +172,8 @@ def test_websocket_locked_room(mock_verify):
         
         # Then receives state
         msg = user_ws.receive_json()
-        if msg["type"] == "sync": msg = user_ws.receive_json()
-        if msg["type"] == "history": msg = user_ws.receive_json()
+        if msg["type"] == "sync":
+            msg = user_ws.receive_json()
+        if msg["type"] == "history":
+            msg = user_ws.receive_json()
         assert msg["type"] == "room_state"

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from fastapi.security import HTTPAuthorizationCredentials
-from typing import Dict, Set, Literal, Optional, Any, List
+from typing import Dict, Literal, Optional, Any, List
 from pydantic import BaseModel, ValidationError
 import json
 import structlog
@@ -27,6 +27,13 @@ in_memory_state: Dict[str, dict] = {}
 # Structure: { room_id: { user_id: WebSocket } }
 ROOM_SIGNALING_REGISTRY: Dict[str, Dict[str, WebSocket]] = {}
 
+# Real-time room network presence registry
+# Structure: { room_id: { user_id: { "ws": WebSocket, "username": str, "avatar": str } } }
+ROOM_PRESENCE_REGISTRY: Dict[str, Dict[str, dict]] = {}
+
+# In-memory history ledger capped at 50 messages per room
+ROOM_CHAT_HISTORY: Dict[str, List[dict]] = {}
+
 async def broadcast_to_room_peers(room_id: str, sender_id: str, message: dict):
     """Dispatches a signal packet to all other connected nodes in the room mesh."""
     if room_id in ROOM_SIGNALING_REGISTRY:
@@ -37,9 +44,22 @@ async def broadcast_to_room_peers(room_id: str, sender_id: str, message: dict):
                 except Exception as e:
                     logger.error(f"Signaling dispatch failed from {sender_id} to {peer_id}: {str(e)}")
 
+async def broadcast_to_room(room_id: str, message: dict, exclude_user_id: Optional[str] = None):
+    """Dispatches a synchronized event to all connected room members."""
+    if room_id in ROOM_PRESENCE_REGISTRY:
+        payload = json.dumps(message)
+        for uid, client in list(ROOM_PRESENCE_REGISTRY[room_id].items()):
+            if exclude_user_id is None or uid != exclude_user_id:
+                try:
+                    await client["ws"].send_text(payload)
+                except Exception as e:
+                    logger.error(f"Failed broadcasting payload in room {room_id}: {str(e)}")
+
 @router.websocket("/ws/room/{room_id}/{user_id}")
 @router.websocket("/ws/mesh/{room_id}/{user_id}")
-async def room_websocket_signaling_endpoint(websocket: WebSocket, room_id: str, user_id: str):
+async def room_websocket_signaling_endpoint(
+    websocket: WebSocket, room_id: str, user_id: str, username: str = "Guest", avatar: str = ""
+):
     await websocket.accept()
     
     if room_id not in ROOM_SIGNALING_REGISTRY:
@@ -51,7 +71,40 @@ async def room_websocket_signaling_endpoint(websocket: WebSocket, room_id: str, 
         return
 
     ROOM_SIGNALING_REGISTRY[room_id][user_id] = websocket
-    logger.info(f"[MESH JOIN] User {user_id} attached to room matrix {room_id}")
+    
+    if room_id not in ROOM_PRESENCE_REGISTRY:
+        ROOM_PRESENCE_REGISTRY[room_id] = {}
+    if room_id not in ROOM_CHAT_HISTORY:
+        ROOM_CHAT_HISTORY[room_id] = []
+
+    # 1. Register presence parameters
+    ROOM_PRESENCE_REGISTRY[room_id][user_id] = {
+        "ws": websocket,
+        "username": username,
+        "avatar": avatar
+    }
+
+    # Compile the currently active member list for the new participant
+    current_members = [
+        {"userId": uid, "username": meta["username"], "avatar": meta["avatar"]}
+        for uid, meta in ROOM_PRESENCE_REGISTRY[room_id].items()
+    ]
+
+    # Hydrate the newly joined user with presence roster and historical messages
+    await websocket.send_text(json.dumps({
+        "type": "ROOM_HYDRATION",
+        "data": {
+            "members": current_members,
+            "history": ROOM_CHAT_HISTORY[room_id]
+        }
+    }))
+
+    # Broadcast USER_JOINED to announce arrival to everyone else
+    await broadcast_to_room(
+        room_id,
+        {"type": "USER_JOINED", "data": {"userId": user_id, "username": username, "avatar": avatar}},
+        exclude_user_id=user_id
+    )
 
     # Notify existing nodes to initialize WebRTC link configurations
     await broadcast_to_room_peers(room_id, user_id, {
@@ -62,33 +115,67 @@ async def room_websocket_signaling_endpoint(websocket: WebSocket, room_id: str, 
     try:
         while True:
             raw_data = await websocket.receive_text()
-            payload = json.loads(raw_data)
-            
-            # Forward WebRTC signaling envelopes (offer, answer, candidate) cleanly
-            target_type = payload.get("type")
-            if target_type in ["offer", "answer", "ice-candidate"]:
+            packet = json.loads(raw_data)
+            event_type = packet.get("type")
+
+            if event_type == "CHAT_MESSAGE":
+                data_obj = packet.get("data", {})
+                msg_payload = {
+                    "userId": user_id,
+                    "username": username,
+                    "text": data_obj.get("text", packet.get("text", "")),
+                    "timestamp": data_obj.get("timestamp", "")
+                }
+                # Keep cache capped at the 50 most recent items
+                ROOM_CHAT_HISTORY[room_id].append(msg_payload)
+                if len(ROOM_CHAT_HISTORY[room_id]) > 50:
+                    ROOM_CHAT_HISTORY[room_id].pop(0)
+
+                await broadcast_to_room(room_id, {"type": "CHAT_MESSAGE", "data": msg_payload})
+
+            elif event_type == "EMOJI_REACTION":
+                data_obj = packet.get("data", {})
+                emoji = data_obj.get("emoji", packet.get("emoji", "🍿"))
+                # Instantly broadcast volatile reactions to spark floating animations
+                await broadcast_to_room(room_id, {
+                    "type": "EMOJI_REACTION",
+                    "data": {"userId": user_id, "emoji": emoji}
+                })
+
+            elif event_type in ["offer", "answer", "ice-candidate"]:
                 await broadcast_to_room_peers(room_id, user_id, {
-                    "type": target_type,
+                    "type": event_type,
                     "senderId": user_id,
-                    "data": payload.get("data")
+                    "data": packet.get("data")
                 })
     except WebSocketDisconnect:
-        logger.info(f"[MESH DISCONNECT] User {user_id} disconnected from room {room_id}")
+        logger.info(f"[CHAT DISCONNECT] Node {user_id} dropped from room {room_id}")
     finally:
         if room_id in ROOM_SIGNALING_REGISTRY and user_id in ROOM_SIGNALING_REGISTRY[room_id]:
             del ROOM_SIGNALING_REGISTRY[room_id][user_id]
             if not ROOM_SIGNALING_REGISTRY[room_id]:
                 del ROOM_SIGNALING_REGISTRY[room_id]
-                
-        # Alert remaining peers to cleanly dismantle connections
+
+        if room_id in ROOM_PRESENCE_REGISTRY and user_id in ROOM_PRESENCE_REGISTRY[room_id]:
+            del ROOM_PRESENCE_REGISTRY[room_id][user_id]
+            if not ROOM_PRESENCE_REGISTRY[room_id]:
+                del ROOM_PRESENCE_REGISTRY[room_id]
+                del ROOM_CHAT_HISTORY[room_id]
+
+        # Broadcast USER_LEFT to maintain client state consistency
+        await broadcast_to_room(room_id, {
+            "type": "USER_LEFT",
+            "data": {"userId": user_id}
+        })
         await broadcast_to_room_peers(room_id, user_id, {
             "type": "peer-left",
             "peerId": user_id
         })
 
-
 class WSMessage(BaseModel):
     type: Literal["play", "pause", "seek", "chat", "submit_passcode", "TRANSFER_HOST", "KICK_USER", "MUTE_USER", "LOCK_ROOM", "UNLOCK_ROOM", "SUBTITLE_TRACK_CHANGED"]
+    type: Literal["play", "pause", "seek", "chat", "submit_passcode", "TRANSFER_HOST", "KICK_USER", "MUTE_USER", "LOCK_ROOM", "UNLOCK_ROOM"]
+
     payload: Optional[Any] = None
 
 class CreateRoomRequest(BaseModel):

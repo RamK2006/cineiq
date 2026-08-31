@@ -2,7 +2,7 @@ import re
 import math
 import time
 import structlog
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Movie

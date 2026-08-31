@@ -14,8 +14,10 @@ import datetime
 import structlog.contextvars
 
 from app.api.v1 import api_router
+from app.api.v1.room import room_websocket_signaling_endpoint
 from app.core.config import settings
 from app.core.security import ALLOWED_ORIGINS, CSP_DIRECTIVES, ENV
+
 
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -267,7 +269,6 @@ except Exception:
 
 app.include_router(api_router, prefix="/api/v1")
 
-from app.api.v1.room import room_websocket_signaling_endpoint
 app.websocket("/ws/room/{room_id}/{user_id}")(room_websocket_signaling_endpoint)
 
 

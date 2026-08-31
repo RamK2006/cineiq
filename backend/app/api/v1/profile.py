@@ -1,6 +1,7 @@
 import math
 from collections import Counter
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
+
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel

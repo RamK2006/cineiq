@@ -1,59 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, Mic, MicOff, Video, VideoOff, Settings } from 'lucide-react';
+import { useAudioAnalyzer, VoiceStatus } from '../hooks/useAudioAnalyzer';
 
 interface PeerStreamProps {
   stream: MediaStream;
   peerId: string;
   isMuted: boolean;
+  onVoiceStatusChange?: (peerId: string, status: VoiceStatus) => void;
 }
 
-export function PeerVideoBubble({ stream, peerId, isMuted }: PeerStreamProps) {
+export function PeerVideoBubble({ stream, peerId, isMuted, onVoiceStatusChange }: PeerStreamProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  
+  const status = useAudioAnalyzer(stream, isMuted);
+  const isSpeaking = status === 'speaking';
+
+  useEffect(() => {
+    if (onVoiceStatusChange) {
+      onVoiceStatusChange(peerId, status);
+    }
+  }, [status, peerId, onVoiceStatusChange]);
 
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.srcObject = stream;
     }
-
-    const AudioContextClass = typeof window !== 'undefined' ? (window.AudioContext || (window as any).webkitAudioContext) : null;
-    if (!AudioContextClass) return;
-
-    let audioContext: AudioContext | null = null;
-    let animationId: number;
-
-    try {
-      if (stream.getAudioTracks().length > 0) {
-        audioContext = new AudioContextClass();
-        const source = audioContext.createMediaStreamSource(stream);
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 512;
-        source.connect(analyser);
-
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-        const monitorAudioVolume = () => {
-          analyser.getByteFrequencyData(dataArray);
-          const averageVolume = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
-
-          // Toggle speaking ring indicator if volume crosses threshold criteria
-          setIsSpeaking(averageVolume > 25 && !isMuted);
-          animationId = requestAnimationFrame(monitorAudioVolume);
-        };
-
-        monitorAudioVolume();
-      }
-    } catch (err) {
-      console.warn("Audio Context init error:", err);
-    }
-
-    return () => {
-      if (animationId) cancelAnimationFrame(animationId);
-      if (audioContext && audioContext.state !== 'closed') {
-        audioContext.close().catch(() => {});
-      }
-    };
-  }, [stream, isMuted]);
+  }, [stream]);
 
   return (
     <div className="relative group flex flex-col items-center">
@@ -83,6 +55,9 @@ interface VoiceMeshOverlayProps {
   onToggleCamera: () => void;
   onToggleMic: () => void;
   onSelectDevice?: (kind: 'videoinput' | 'audioinput', deviceId: string) => void;
+  onVoiceStatusChange?: (peerId: string, status: VoiceStatus) => void;
+  shortcutKey?: string;
+  onChangeShortcut?: (key: string) => void;
 }
 
 export default function VoiceMeshOverlay({
@@ -92,7 +67,10 @@ export default function VoiceMeshOverlay({
   micActive,
   onToggleCamera,
   onToggleMic,
-  onSelectDevice
+  onSelectDevice,
+  onVoiceStatusChange,
+  shortcutKey,
+  onChangeShortcut
 }: VoiceMeshOverlayProps) {
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -129,12 +107,12 @@ export default function VoiceMeshOverlay({
 
         {/* Local Stream Bubble */}
         {localStream && (
-          <PeerVideoBubble stream={localStream} peerId="You" isMuted={true} />
+          <PeerVideoBubble stream={localStream} peerId="You" isMuted={!micActive} onVoiceStatusChange={onVoiceStatusChange} />
         )}
 
         {/* Remote Mesh Streams Loop mapping */}
         {Array.from(peerStreams.entries()).map(([peerId, stream]) => (
-          <PeerVideoBubble key={peerId} stream={stream} peerId={peerId} isMuted={false} />
+          <PeerVideoBubble key={peerId} stream={stream} peerId={peerId} isMuted={false} onVoiceStatusChange={onVoiceStatusChange} />
         ))}
       </aside>
 
@@ -159,6 +137,21 @@ export default function VoiceMeshOverlay({
           {micActive ? <Mic size={14} /> : <MicOff size={14} />}
           {micActive ? 'Mic On' : 'Mic Off'}
         </button>
+
+        {onChangeShortcut && shortcutKey && (
+          <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-lg p-1">
+            <span className="text-[10px] text-slate-400 px-1 font-mono">PTT:</span>
+            <select 
+              value={shortcutKey} 
+              onChange={(e) => onChangeShortcut(e.target.value)}
+              className="bg-transparent text-slate-200 text-xs font-bold outline-none cursor-pointer"
+              aria-label="Push to talk shortcut"
+            >
+              <option value="v">V</option>
+              <option value="space">Space</option>
+            </select>
+          </div>
+        )}
 
         {(audioDevices.length > 0 || videoDevices.length > 0) && (
           <button
