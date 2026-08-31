@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -10,6 +10,7 @@ import { apiRequest } from '../../lib/api';
 import { searchCatalog } from '../../lib/catalog';
 
 type Result = { id: string; title: string; overview: string; poster_path?: string | null; similarity_score: number };
+type Suggestion = { id: string; title: string; poster_path?: string | null; year?: number | null };
 
 const AVAILABLE_GENRES = [
   'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 
@@ -24,6 +25,12 @@ function SearchContent() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Result[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Suggestions state
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   
   // Filter state
   const [showFilters, setShowFilters] = useState(false);
@@ -32,6 +39,54 @@ function SearchContent() {
   const [yearFrom, setYearFrom] = useState<number | ''>('');
   const [yearTo, setYearTo] = useState<number | ''>('');
   const [sortBy, setSortBy] = useState<string>('popularity');
+
+  // Fetch instant suggestions on query change
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setHighlightedIndex(-1);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const data = (await apiRequest(`/search/suggest?q=${encodeURIComponent(q)}&limit=5`)) as Suggestion[];
+        if (Array.isArray(data) && data.length > 0) {
+          setSuggestions(data);
+          setShowSuggestions(true);
+          setHighlightedIndex(-1);
+          return;
+        }
+      } catch {
+        // Fallback to local catalog search
+      }
+
+      const localMatches = searchCatalog(q, 5).map((m) => ({
+        id: m.id,
+        title: m.title,
+        poster_path: m.poster_path,
+        year: m.year ? parseInt(m.year, 10) : null,
+      }));
+      setSuggestions(localMatches);
+      setShowSuggestions(localMatches.length > 0);
+      setHighlightedIndex(-1);
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // Close suggestions popover when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Initialize from URL
   useEffect(() => {
@@ -59,6 +114,34 @@ function SearchContent() {
       prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
     );
   };
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!showSuggestions || suggestions.length === 0) {
+      if (e.key === 'ArrowDown' && suggestions.length > 0) {
+        setShowSuggestions(true);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1));
+    } else if (e.key === 'Enter') {
+      if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+        e.preventDefault();
+        setShowSuggestions(false);
+        router.push(`/movie/${suggestions[highlightedIndex].id}`);
+      } else {
+        setShowSuggestions(false);
+      }
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false);
+      setHighlightedIndex(-1);
+    }
+  }
 
   async function executeSearch(
     q: string, 
@@ -106,6 +189,7 @@ function SearchContent() {
 
   function handleSearch(event: React.FormEvent) {
     event.preventDefault();
+    setShowSuggestions(false);
     if (!query.trim() && selectedGenres.length === 0 && !yearFrom && !yearTo && minRating === 0) return;
     
     const params = new URLSearchParams();
@@ -130,32 +214,136 @@ function SearchContent() {
         </div>
         
         <form onSubmit={handleSearch} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="glass-panel" style={{ display: 'flex', padding: 8, gap: 8 }}>
-            <Search aria-hidden size={24} style={{ alignSelf: 'center', marginLeft: 8 }} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              aria-label="Search for movies by description or title"
-              placeholder="Describe a movie, mood, or plot (e.g. Nolan space adventure)"
-              className="search-input"
-              style={{ flex: 1 }}
-            />
-            <button 
-              type="button" 
-              onClick={() => setShowFilters(!showFilters)}
-              className={`btn ${showFilters ? 'btn-primary' : 'btn-glass'}`}
-              style={{ padding: '8px 12px' }}
-              title="Toggle Filters"
-            >
-              <Filter size={20} />
-            </button>
-            <button type="button" aria-label="Voice search is not available" disabled title="Voice search requires browser speech recognition" style={{ padding: '8px' }}>
-              <Mic size={22} />
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={isSearching}>
-              {isSearching ? 'Searching…' : 'Search'}
-            </button>
+          <div ref={searchContainerRef} style={{ position: 'relative', width: '100%' }}>
+            <div className="glass-panel" style={{ display: 'flex', padding: 8, gap: 8 }}>
+              <Search aria-hidden size={24} style={{ alignSelf: 'center', marginLeft: 8 }} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onFocus={() => {
+                  if (query.trim() && suggestions.length > 0) setShowSuggestions(true);
+                }}
+                onKeyDown={handleKeyDown}
+                role="combobox"
+                aria-expanded={showSuggestions && suggestions.length > 0}
+                aria-autocomplete="list"
+                aria-controls="search-suggestions-list"
+                aria-activedescendant={highlightedIndex >= 0 ? `suggestion-option-${highlightedIndex}` : undefined}
+                aria-label="Search for movies by description or title"
+                placeholder="Describe a movie, mood, or plot (e.g. Nolan space adventure)"
+                className="search-input"
+                style={{ flex: 1 }}
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowFilters(!showFilters)}
+                className={`btn ${showFilters ? 'btn-primary' : 'btn-glass'}`}
+                style={{ padding: '8px 12px' }}
+                title="Toggle Filters"
+              >
+                <Filter size={20} />
+              </button>
+              <button type="button" aria-label="Voice search is not available" disabled title="Voice search requires browser speech recognition" style={{ padding: '8px' }}>
+                <Mic size={22} />
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={isSearching} onClick={() => setShowSuggestions(false)}>
+                {isSearching ? 'Searching…' : 'Search'}
+              </button>
+            </div>
+
+            {showSuggestions && suggestions.length > 0 && (
+              <div
+                id="search-suggestions-list"
+                role="listbox"
+                aria-label="Search suggestions"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  marginTop: 8,
+                  background: 'rgba(15, 23, 42, 0.95)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: 12,
+                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
+                  zIndex: 50,
+                  overflow: 'hidden',
+                }}
+              >
+                {suggestions.map((item, index) => (
+                  <div
+                    key={item.id}
+                    role="option"
+                    id={`suggestion-option-${index}`}
+                    aria-selected={highlightedIndex === index}
+                    onClick={() => {
+                      setShowSuggestions(false);
+                      router.push(`/movie/${item.id}`);
+                    }}
+                    onMouseEnter={() => setHighlightedIndex(index)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '10px 14px',
+                      cursor: 'pointer',
+                      background: highlightedIndex === index ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                      transition: 'background 0.15s ease',
+                      borderBottom: index < suggestions.length - 1 ? '1px solid rgba(255, 255, 255, 0.05)' : 'none',
+                    }}
+                  >
+                    {item.poster_path ? (
+                      <Image
+                        src={item.poster_path}
+                        alt=""
+                        width={36}
+                        height={52}
+                        style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 36,
+                          height: 52,
+                          borderRadius: 4,
+                          background: 'rgba(255, 255, 255, 0.1)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 12,
+                          color: 'var(--text-secondary)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        🎬
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          fontSize: 15,
+                          color: '#ffffff',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {item.title}
+                      </div>
+                      {item.year && (
+                        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
+                          {item.year}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+
 
           {showFilters && (
             <div className="glass-panel" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>

@@ -32,5 +32,5 @@ limiter = Limiter(
     default_limits=[settings.rate_limit_global],
     enabled=settings.rate_limit_enabled,
     headers_enabled=True,  # X-RateLimit-* headers
-    request_filter=ip_whitelist_filter,
 )
+
