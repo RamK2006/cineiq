@@ -32,6 +32,11 @@ export default function RoomClient() {
   const [members, setMembers] = useState<{ userId: string; username: string; avatar: string }[]>([]);
   const [reactions, setReactions] = useState<Reaction[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [networkOffset, setNetworkOffset] = useState<number>(0);
+  const [hostStatus, setHostStatus] = useState<string>('');
+
+  
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Moderation state
   const [hostId, setHostId] = useState<string | null>(null);
@@ -160,9 +165,40 @@ export default function RoomClient() {
       if (data?.user) setMutedUsers(prev => prev.includes(data.user) ? prev : [...prev, data.user]);
     });
 
-    ws.on('USER_UNMUTED', (data) => {
-      if (data?.user) setMutedUsers(prev => prev.filter(u => u !== data.user));
-    });
+  const connectWebSocket = useCallback(async () => {
+    if (expectedDisconnect.current) return;
+    const token = await getToken();
+    if (!token) { setConnectionStatus('disconnected'); return; }
+    const configuredUrl = process.env.NEXT_PUBLIC_WS_URL;
+    const wsBase = configuredUrl || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/v1`;
+    const wsUrl = `${wsBase.replace(/\/$/, '')}/room/ws/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`;
+    
+    console.log(`Connecting to WS room: ${roomId}`);
+    setConnectionStatus('connecting');
+    
+    ws.current = new WebSocket(wsUrl);
+
+    
+    ws.current.onopen = () => {
+      console.log('Connected to WS');
+      setConnectionStatus('connected');
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+      
+      // Start NTP Clock Sync Loop
+      const pingInterval = setInterval(() => {
+        if (ws.current?.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({ type: 'PING', payload: { client_time: Date.now() } }));
+        }
+      }, 5000);
+      
+      // Cleanup on close
+      const oldOnClose = ws.current.onclose;
+      ws.current.onclose = (e) => {
+        clearInterval(pingInterval);
+        if (oldOnClose) oldOnClose(e);
+      };
+    };
+
 
     ws.current.onmessage = (event) => {
       try {
@@ -173,6 +209,44 @@ export default function RoomClient() {
         }
         
         switch (message.type) {
+          case 'PONG':
+            if (message.payload) {
+              const rtt = Date.now() - message.payload.client_time;
+              const serverTime = message.payload.server_time;
+              const newOffset = serverTime - (Date.now() - rtt / 2);
+              setNetworkOffset(prev => (prev * 0.8) + (newOffset * 0.2)); // Smooth the offset
+            }
+            break;
+          case 'SYNC_TIME':
+            if (message.payload) {
+                const { server_time, progress: sProgress, action, state_timestamp } = message.payload;
+                const now = Date.now();
+                const currentServerTime = now + networkOffset;
+                
+                let expectedProgress = sProgress;
+                if (action === 'play') {
+                    const elapsed = (currentServerTime - state_timestamp) / 1000;
+                    expectedProgress += elapsed;
+                    setIsPlaying(true);
+                    setHostStatus('Playing');
+                } else {
+                    setIsPlaying(false);
+                    setHostStatus('Paused');
+                }
+                
+                // If drifted by more than 0.3s, seek
+                setProgress(prev => {
+                    if (Math.abs(prev - expectedProgress) > 0.3) {
+                        return expectedProgress;
+                    }
+                    return prev;
+                });
+            }
+            break;
+          case 'HOST_ACTION_DENIED':
+            console.warn("Host Action Denied:", message.error);
+            break;
+
           case 'PASSCODE_REQUIRED':
             setShowPasscodeModal(true);
             setPasscodeError('');
@@ -279,17 +353,14 @@ export default function RoomClient() {
     };
   }, [connectWebSocket]);
 
-  const handleTrackChange = (trackId: string | null) => {
-    setActiveTrackId(trackId);
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: 'SUBTITLE_TRACK_CHANGED',
-        payload: { trackId }
-      }));
-    }
-  };
+  
+  const requestSync = useCallback(() => {
+      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({ type: 'REQUEST_SYNC', payload: {} }));
+      }
+  }, []);
 
-  const emitSync = (action: 'play' | 'pause' | 'seek', newProgress?: number) => {
+  const emitSync = useCallback((action: 'play' | 'pause' | 'seek', newProgress?: number) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({
         type: action,
@@ -499,6 +570,52 @@ export default function RoomClient() {
             </motion.button>
           </div>
         )}
+        
+        <CinemaOverlay 
+          isFullscreen={isFullscreen} 
+          messages={messages} 
+          chatInput={chatInput} 
+          setChatInput={setChatInput} 
+          handleChat={handleChat} 
+          currentUserId={currentUserId} 
+          isMuted={mutedUsers.includes(currentUserId)} 
+          reactions={reactions} 
+          onSendReaction={handleSendReaction} 
+          isChatVisible={isChatVisible}
+          setChatVisible={setChatVisible}
+        />
+        
+        {/* Video Controls Bottom Bar */}
+        <div className="glass-panel room-video-controls" style={{ position: 'absolute', bottom: '20px', left: '20px', right: isFullscreen ? '20px' : '320px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px', zIndex: 50, transition: 'right 0.3s' }}>
+          <button onClick={handlePlayPause} aria-label={isPlaying ? 'Pause video' : 'Play video'} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+            {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
+          </button>
+          
+          <div onClick={handleSeek} style={{ flex: 1, height: '4px', background: 'rgba(255,255,255,0.2)', borderRadius: '2px', cursor: 'pointer' }}>
+            <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent-primary)', borderRadius: '2px', transition: 'width 0.1s' }} />
+          </div>
+
+          
+          <span style={{ fontFamily: 'var(--font-body)', fontSize: '14px' }}>00:00 / 02:45:00</span>
+          
+          <button onClick={requestSync} title="Request Resync" style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer' }}>
+            Sync
+          </button>
+          
+          {hostStatus && (
+             <span style={{ fontSize: '12px', color: 'var(--accent-primary)', marginLeft: '8px' }}>
+                Host: {hostStatus}
+             </span>
+          )}
+
+          
+          <button aria-label="Adjust volume" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+            <Volume2 size={20} />
+          </button>
+          <button onClick={toggleFullscreen} aria-label="Toggle fullscreen" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+            <Maximize size={20} />
+          </button>
+        </div>
       </div>
       <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-black">
         {!isFullscreen && (
