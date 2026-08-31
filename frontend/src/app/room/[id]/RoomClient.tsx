@@ -2,39 +2,36 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, Maximize, Volume2, Users, MoreVertical, Lock, Unlock, LogOut } from 'lucide-react';
+import { Play, Pause, Maximize, Volume2, Users, Lock, Unlock, LogOut, MessageSquare, X } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
 import VideoPlayer from '@/components/VideoPlayer';
+import CinemaOverlay, { Reaction } from '@/components/CinemaOverlay';
 import { SubtitleTrackData } from '@/types/media';
 import VoiceMeshOverlay from '@/components/VoiceMeshOverlay';
 import { usePushToTalk } from '@/hooks/usePushToTalk';
 import { VoiceStatus } from '@/hooks/useAudioAnalyzer';
-
-
+import ChatSidebar from '@/components/chat/ChatSidebar';
+import { RoomWebSocket, WSMessage } from '@/lib/websocket';
 
 export default function RoomClient() {
   const params = useParams();
   const router = useRouter();
   const roomId = params.id as string;
-  
   const { user } = useUser();
   const { getToken } = useAuth();
-  
-  // Use user.id for unique identification, fallback to name
+
   const currentUserId = user?.id || 'unknown';
   const userName = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? 'You';
+  const userAvatar = user?.imageUrl || '';
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [messages, setMessages] = useState<{user: string, text: string, timestamp?: string}[]>([]);
+  const [messages, setMessages] = useState<{ user: string; userId?: string; text: string; timestamp: string }[]>([]);
   const [chatInput, setChatInput] = useState('');
-  const [participants, setParticipants] = useState<string[]>([currentUserId]);
-  const [members, setMembers] = useState<{userId: string, username: string, avatar: string}[]>([]);
-  const [reactions, setReactions] = useState<{id: number, emoji: string}[]>([]);
+  const [members, setMembers] = useState<{ userId: string; username: string; avatar: string }[]>([]);
+  const [reactions, setReactions] = useState<Reaction[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
-  
-  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Moderation state
   const [hostId, setHostId] = useState<string | null>(null);
@@ -54,287 +51,118 @@ export default function RoomClient() {
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const expectedDisconnect = useRef<boolean>(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isChatVisible, setChatVisible] = useState(true);
 
-  // Realtime WebRTC Voice Mesh state & refs
+  const roomVideoAreaRef = useRef<HTMLDivElement>(null);
+  const availableTracks: SubtitleTrackData[] = [
+    { id: 'en', label: 'English', language: 'en', src: '/subtitles/en.srt', kind: 'subtitles', format: 'srt' },
+    { id: 'es', label: 'Spanish', language: 'es', src: '/subtitles/es.vtt', kind: 'subtitles', format: 'vtt' }
+  ];
+
+  // WebRTC Voice Mesh state
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [peerStreams, setPeerStreams] = useState<Map<string, MediaStream>>(new Map());
   const [cameraActive, setCameraActive] = useState(true);
-  const [micActive, setMicActive] = useState(false); // Default to false
+  const [micActive, setMicActive] = useState(false);
   const [voiceStates, setVoiceStates] = useState<Record<string, VoiceStatus>>({});
-  
   const { isPttActive, shortcutKey, changeShortcut } = usePushToTalk('v');
-  
-  // Update local microphone track enablement whenever micActive or PTT changes
-  useEffect(() => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-        track.enabled = micActive || isPttActive;
-      });
-    }
-  }, [localStream, micActive, isPttActive]);
 
-
-  const meshWsRef = useRef<WebSocket | null>(null);
-  const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const localUserIdRef = useRef<string>(user?.id || `user_${Math.floor(Math.random() * 10000)}`);
-
+  const wsRef = useRef<RoomWebSocket | null>(null);
 
   const triggerFloatingEmoji = useCallback((emoji: string) => {
     const id = Date.now() + Math.random();
-    setReactions(prev => [...prev, { id, emoji }]);
+    setReactions(prev => [...prev, { id, emoji, timestamp: Date.now() }]);
     setTimeout(() => {
       setReactions(prev => prev.filter(r => r.id !== id));
     }, 2000);
   }, []);
 
-  const handleSendReaction = (emoji: string) => {
-    if (meshWsRef.current && meshWsRef.current.readyState === WebSocket.OPEN) {
-      meshWsRef.current.send(JSON.stringify({
-        type: 'EMOJI_REACTION',
-        data: { emoji }
-      }));
+  const handleSendReaction = useCallback((emoji: string) => {
+    if (wsRef.current) {
+      wsRef.current.send('EMOJI_REACTION', { emoji });
     }
     triggerFloatingEmoji(emoji);
-  };
-
-  const initializeMeshWebSocket = useCallback((stream: MediaStream | null) => {
-    if (typeof window === 'undefined') return;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const configuredUrl = process.env.NEXT_PUBLIC_WS_URL;
-    let wsUrl = `${protocol}//${host}/ws/room/${roomId}/${localUserIdRef.current}?username=${encodeURIComponent(userName)}`;
-    if (configuredUrl) {
-      const wsBase = configuredUrl.replace(/\/$/, '');
-      wsUrl = `${wsBase}/room/ws/room/${roomId}/${localUserIdRef.current}?username=${encodeURIComponent(userName)}`;
-    }
-
-    meshWsRef.current = new WebSocket(wsUrl);
-
-    meshWsRef.current.onmessage = async (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        const { type, peerId, senderId, data } = message;
-
-        switch (type) {
-          case 'ROOM_HYDRATION':
-            if (data?.members) setMembers(data.members);
-            if (data?.history) {
-              setMessages(data.history.map((m: any) => ({
-                user: m.username || m.userId || 'Guest',
-                text: m.text || '',
-                timestamp: m.timestamp || ''
-              })));
-            }
-            break;
-          case 'USER_JOINED':
-            if (data?.userId) {
-              setMembers(prev => [...prev.filter(m => m.userId !== data.userId), data]);
-            }
-            break;
-          case 'USER_LEFT':
-            if (data?.userId) {
-              setMembers(prev => prev.filter(m => m.userId !== data.userId));
-            }
-            break;
-          case 'CHAT_MESSAGE':
-            if (data) {
-              setMessages(prev => [...prev, {
-                user: data.username || data.userId || 'Guest',
-                text: data.text || '',
-                timestamp: data.timestamp || ''
-              }]);
-            }
-            break;
-          case 'EMOJI_REACTION':
-            if (data?.emoji) triggerFloatingEmoji(data.emoji);
-            break;
-          case 'peer-joined':
-            createNewPeerConnection(peerId, stream, true);
-            break;
-          case 'offer':
-            const pcOffer = createNewPeerConnection(senderId, stream, false);
-            await pcOffer.setRemoteDescription(new RTCSessionDescription(data));
-            const answer = await pcOffer.createAnswer();
-            await pcOffer.setLocalDescription(answer);
-            meshWsRef.current?.send(JSON.stringify({ type: 'answer', data: answer }));
-            break;
-          case 'answer':
-            const pcAnswer = peersRef.current.get(senderId);
-            await pcAnswer?.setRemoteDescription(new RTCSessionDescription(data));
-            break;
-          case 'ice-candidate':
-            const pcCandidate = peersRef.current.get(senderId);
-            await pcCandidate?.addIceCandidate(new RTCIceCandidate(data));
-            break;
-          case 'peer-left':
-            removePeer(peerId);
-            break;
-        }
-      } catch (err) {
-        console.error("WebRTC mesh signaling frame parse error:", err);
-      }
-    };
-  }, [roomId, userName, triggerFloatingEmoji]);
-
-
-  const createNewPeerConnection = useCallback((targetPeerId: string, stream: MediaStream | null, initiateOffer: boolean) => {
-    if (peersRef.current.has(targetPeerId)) {
-      peersRef.current.get(targetPeerId)?.close();
-    }
-
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    });
-
-    peersRef.current.set(targetPeerId, pc);
-
-    if (stream) {
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-    }
-
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        meshWsRef.current?.send(JSON.stringify({ type: 'ice-candidate', data: e.candidate }));
-      }
-    };
-
-    pc.ontrack = (e) => {
-      if (e.streams && e.streams[0]) {
-        setPeerStreams(prev => {
-          const next = new Map(prev);
-          next.set(targetPeerId, e.streams[0]);
-          return next;
-        });
-      }
-    };
-
-    if (initiateOffer) {
-      pc.createOffer().then(async (offer) => {
-        await pc.setLocalDescription(offer);
-        meshWsRef.current?.send(JSON.stringify({ type: 'offer', data: offer }));
-      }).catch(err => console.error("Error creating RTC offer:", err));
-    }
-
-    return pc;
-  }, []);
-
-  const removePeer = useCallback((targetPeerId: string) => {
-    const pc = peersRef.current.get(targetPeerId);
-    if (pc) {
-      pc.close();
-      peersRef.current.delete(targetPeerId);
-    }
-    setPeerStreams(prev => {
-      const next = new Map(prev);
-      next.delete(targetPeerId);
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    let currentStream: MediaStream | null = null;
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        .then((stream) => {
-          currentStream = stream;
-          setLocalStream(stream);
-          initializeMeshWebSocket(stream);
-        })
-        .catch((err) => {
-          console.warn("Media capture fallback:", err);
-          initializeMeshWebSocket(null);
-        });
-    } else {
-      initializeMeshWebSocket(null);
-    }
-
-    const handleBeforeUnload = () => {
-      meshWsRef.current?.close();
-      peersRef.current.forEach(pc => pc.close());
-      currentStream?.getTracks().forEach(track => track.stop());
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      meshWsRef.current?.close();
-      peersRef.current.forEach(pc => pc.close());
-      currentStream?.getTracks().forEach(track => track.stop());
-    };
-  }, [roomId, initializeMeshWebSocket]);
-
-  const toggleCamera = () => {
-    if (localStream) {
-      localStream.getVideoTracks().forEach(track => {
-        track.enabled = !cameraActive;
-      });
-      setCameraActive(!cameraActive);
-    }
-  };
-
-  const toggleMic = () => {
-    setMicActive(!micActive);
-  };
-
-  const handleVoiceStatusChange = useCallback((peerId: string, status: VoiceStatus) => {
-    setVoiceStates(prev => {
-      if (prev[peerId] === status) return prev;
-      return { ...prev, [peerId]: status };
-    });
-  }, []);
-
-  const handleSelectDevice = async (kind: 'videoinput' | 'audioinput', deviceId: string) => {
-    try {
-      const constraints: MediaStreamConstraints = {};
-      if (kind === 'videoinput') constraints.video = { deviceId: { exact: deviceId } };
-      if (kind === 'audioinput') constraints.audio = { deviceId: { exact: deviceId } };
-
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-      const newTrack = kind === 'videoinput' ? newStream.getVideoTracks()[0] : newStream.getAudioTracks()[0];
-      
-      if (newTrack && localStream) {
-        const oldTrack = kind === 'videoinput' ? localStream.getVideoTracks()[0] : localStream.getAudioTracks()[0];
-        if (oldTrack) {
-          localStream.removeTrack(oldTrack);
-          oldTrack.stop();
-        }
-        localStream.addTrack(newTrack);
-
-        peersRef.current.forEach((pc) => {
-          const sender = pc.getSenders().find(s => s.track?.kind === (kind === 'videoinput' ? 'video' : 'audio'));
-          if (sender) {
-            sender.replaceTrack(newTrack);
-          }
-        });
-      }
-    } catch (err) {
-      console.error("Failed to switch media device:", err);
-    }
-  };
-
+  }, [triggerFloatingEmoji]);
 
   const connectWebSocket = useCallback(async () => {
-    if (expectedDisconnect.current) return;
+    if (kicked) return;
     const token = await getToken();
-    if (!token) { setConnectionStatus('disconnected'); return; }
-    const configuredUrl = process.env.NEXT_PUBLIC_WS_URL;
-    const wsBase = configuredUrl || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/v1`;
-    const wsUrl = `${wsBase.replace(/\/$/, '')}/room/ws/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`;
-    
-    console.log(`Connecting to WS room: ${roomId}`);
-    setConnectionStatus('connecting');
-    
-    ws.current = new WebSocket(wsUrl);
+    if (!token) {
+      setConnectionStatus('disconnected');
+      return;
+    }
 
-    ws.current.onopen = () => {
-      console.log('Connected to WS');
-      setConnectionStatus('connected');
-      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
-    };
+    const ws = new RoomWebSocket(roomId, currentUserId, token);
+    wsRef.current = ws;
+
+    ws.on('ROOM_HYDRATION', (data) => {
+      if (data?.members) setMembers(data.members);
+      if (data?.history) {
+        setMessages(data.history.map((m: any) => ({
+          user: m.username || m.userId || 'Guest',
+          userId: m.userId,
+          text: m.text || '',
+          timestamp: m.timestamp || ''
+        })));
+      }
+    });
+
+    ws.on('USER_JOINED', (data) => {
+      if (data?.userId) {
+        setMembers(prev => [...prev.filter(m => m.userId !== data.userId), data]);
+        setMessages(prev => [...prev, { user: 'System', text: `${data.username} joined the room`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      }
+    });
+
+    ws.on('USER_LEFT', (data) => {
+      if (data?.userId) {
+        setMembers(prev => prev.filter(m => m.userId !== data.userId));
+        // Find username for system message if possible, otherwise generic
+        setMessages(prev => [...prev, { user: 'System', text: `A participant left the room`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      }
+    });
+
+    ws.on('CHAT_MESSAGE', (data) => {
+      if (data) {
+        setMessages(prev => [...prev, {
+          user: data.username || data.userId || 'Guest',
+          userId: data.userId,
+          text: data.text || '',
+          timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+      }
+    });
+
+    ws.on('EMOJI_REACTION', (data) => {
+      if (data?.emoji) triggerFloatingEmoji(data.emoji);
+    });
+
+    ws.on('room_state', (payload) => {
+      setHostId(payload.host_id);
+      setIsLocked(payload.is_locked);
+      setMutedUsers(payload.muted_users || []);
+    });
+
+    ws.on('sync', (payload) => {
+      if (payload?.action === 'play') setIsPlaying(true);
+      else if (payload?.action === 'pause') setIsPlaying(false);
+      if (payload?.progress !== undefined) setProgress(payload.progress);
+    });
+
+    ws.on('USER_KICKED', () => {
+      setKicked(true);
+      ws.close();
+      setTimeout(() => router.push('/'), 3000);
+    });
+
+    ws.on('USER_MUTED', (data) => {
+      if (data?.user) setMutedUsers(prev => prev.includes(data.user) ? prev : [...prev, data.user]);
+    });
+
+    ws.on('USER_UNMUTED', (data) => {
+      if (data?.user) setMutedUsers(prev => prev.filter(u => u !== data.user));
+    });
 
     ws.current.onmessage = (event) => {
       try {
@@ -431,27 +259,23 @@ export default function RoomClient() {
         console.error('Failed to parse WS message', err);
       }
     };
+    ws.on('ROOM_LOCKED', () => setIsLocked(true));
+    ws.on('ROOM_UNLOCKED', () => setIsLocked(false));
+    ws.on('PASSCODE_REQUIRED', () => { setShowPasscodeModal(true); setPasscodeError(''); });
+    ws.on('PASSCODE_REJECTED', () => setPasscodeError('Incorrect passcode'));
+    ws.on('PASSCODE_ACCEPTED', () => { setShowPasscodeModal(false); setPasscodeError(''); });
 
-    ws.current.onclose = (event) => {
-      console.log('Disconnected from WS', event.code);
-      setConnectionStatus('disconnected');
-      if (!expectedDisconnect.current && !kicked) {
-        reconnectTimeout.current = setTimeout(connectWebSocket, 3000);
-      }
-    };
-    
-    ws.current.onerror = (error) => {
-      console.error('WS Error:', error);
-      ws.current?.close();
-    };
-  }, [getToken, roomId, kicked, router, showPasscodeModal]);
+    // Connect the underlying WebSocket
+    ws.connect(userName, userAvatar);
+    setConnectionStatus('connected');
+  }, [roomId, currentUserId, getToken, kicked, router, userName, userAvatar, triggerFloatingEmoji]);
 
   useEffect(() => {
-    void connectWebSocket();
+    connectWebSocket();
     return () => {
-      expectedDisconnect.current = true;
-      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
-      if (ws.current) ws.current.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
   }, [connectWebSocket]);
 
@@ -473,15 +297,18 @@ export default function RoomClient() {
           progress: newProgress !== undefined ? newProgress : progress
         }
       }));
+  const emitSync = useCallback((action: 'play' | 'pause' | 'seek', newProgress?: number) => {
+    if (wsRef.current) {
+      wsRef.current.send(action, { progress: newProgress !== undefined ? newProgress : progress });
     }
-  };
+  }, [progress]);
 
-  const handlePlayPause = () => {
+  const handlePlayPause = useCallback(() => {
     const newIsPlaying = !isPlaying;
     setIsPlaying(newIsPlaying);
     emitSync(newIsPlaying ? 'play' : 'pause');
-  };
-  
+  }, [isPlaying, emitSync]);
+
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -492,77 +319,80 @@ export default function RoomClient() {
 
   const handleChat = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
-    if (mutedUsers.includes(currentUserId)) return;
-    
+    if (!chatInput.trim() || mutedUsers.includes(currentUserId)) return;
+
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const payload = { text: chatInput, timestamp };
-
-    if (meshWsRef.current && meshWsRef.current.readyState === WebSocket.OPEN) {
-      meshWsRef.current.send(JSON.stringify({
-        type: 'CHAT_MESSAGE',
-        data: payload
-      }));
-    }
-
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: 'chat',
-        payload: { text: chatInput }
-      }));
+    if (wsRef.current) {
+      wsRef.current.send('CHAT_MESSAGE', { text: chatInput, timestamp });
     }
     setChatInput('');
   };
 
-  useEffect(() => {
-    chatScrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
   const submitPasscode = (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!passcodeInput.trim()) return;
-      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-          ws.current.send(JSON.stringify({
-              type: 'submit_passcode',
-              payload: { passcode: passcodeInput }
-          }));
-      }
+    e.preventDefault();
+    if (!passcodeInput.trim() || !wsRef.current) return;
+    wsRef.current.send('submit_passcode', { passcode: passcodeInput });
   };
 
   const toggleLock = () => {
-      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-          ws.current.send(JSON.stringify({
-              type: isLocked ? 'UNLOCK_ROOM' : 'LOCK_ROOM'
-          }));
-      }
+    if (wsRef.current) {
+      wsRef.current.send(isLocked ? 'UNLOCK_ROOM' : 'LOCK_ROOM');
+    }
   };
-  
+
+  const handleTrackChange = (trackId: string | null) => {
+    setActiveTrackId(trackId);
+    if (wsRef.current) {
+      wsRef.current.send('SUBTITLE_TRACK_CHANGED', { track_id: trackId });
+    }
+  };
+
   const isHost = currentUserId === hostId;
 
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      roomVideoAreaRef.current?.requestFullscreen().catch(err => console.error(`Fullscreen error: ${err.message}`));
+    } else {
+      document.exitFullscreen();
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const handleVoiceStatusChange = useCallback((peerId: string, status: VoiceStatus) => {
+    setVoiceStates(prev => {
+      if (prev[peerId] === status) return prev;
+      return { ...prev, [peerId]: status };
+    });
+  }, []);
+
   if (kicked) {
-      return (
-          <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#000', color: 'white' }}>
-              <div style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #ef4444', padding: '24px', borderRadius: '12px', textAlign: 'center' }}>
-                  <LogOut size={48} color="#ef4444" style={{ margin: '0 auto 16px' }} />
-                  <h2 style={{ fontSize: '24px', marginBottom: '8px' }}>You were removed from this room</h2>
-                  <p style={{ color: 'var(--text-secondary)' }}>Redirecting to home...</p>
-              </div>
-          </div>
-      );
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-black text-white">
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-8 text-center">
+          <LogOut size={48} className="mx-auto mb-4 text-red-500" />
+          <h2 className="mb-2 text-2xl font-semibold">You were removed from this room</h2>
+          <p className="text-slate-400">Redirecting to home...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <main className="room-container" style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#000', position: 'relative' }}>
-      
+    <main className="relative flex h-screen flex-col bg-black" ref={roomVideoAreaRef}>
       {/* Floating Animated Reaction Container */}
-      <div style={{ position: 'absolute', bottom: '100px', right: '350px', pointerEvents: 'none', zIndex: 60, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div className="pointer-events-none absolute bottom-24 right-80 z-50 flex flex-col gap-2">
         {reactions.map((r) => (
           <motion.span
             key={r.id}
             initial={{ opacity: 1, y: 0, scale: 0.8 }}
             animate={{ opacity: 0, y: -100, scale: 1.5 }}
             transition={{ duration: 1.8, ease: "easeOut" }}
-            style={{ fontSize: '36px', textAlign: 'center', display: 'block' }}
+            className="block text-center text-4xl"
           >
             {r.emoji}
           </motion.span>
@@ -572,31 +402,34 @@ export default function RoomClient() {
       {/* Passcode Modal Overlay */}
       <AnimatePresence>
         {showPasscodeModal && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
           >
-            <div style={{ background: '#111827', padding: '32px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', width: '100%', maxWidth: '400px' }}>
-                <h2 style={{ fontSize: '20px', color: 'white', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Lock size={20} /> Private Room
-                </h2>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '24px' }}>This room is locked. Please enter the passcode to join.</p>
-                <form onSubmit={submitPasscode}>
-                    <input 
-                        type="password" 
-                        value={passcodeInput}
-                        onChange={(e) => setPasscodeInput(e.target.value)}
-                        placeholder="Enter passcode"
-                        className="input-glass"
-                        style={{ width: '100%', padding: '12px 16px', fontSize: '16px', marginBottom: '16px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
-                        autoFocus
-                    />
-                    {passcodeError && <div style={{ color: '#ef4444', fontSize: '14px', marginBottom: '16px' }}>{passcodeError}</div>}
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                        <button type="button" onClick={() => router.push('/')} style={{ flex: 1, padding: '12px', background: 'transparent', color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '8px', cursor: 'pointer' }}>Cancel</button>
-                        <button type="submit" style={{ flex: 1, padding: '12px', background: 'var(--accent-primary)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}>Join Room</button>
-                    </div>
-                </form>
+            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-8">
+              <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-white">
+                <Lock size={20} /> Private Room
+              </h2>
+              <p className="mb-6 text-sm text-slate-400">This room is locked. Please enter the passcode to join.</p>
+              <form onSubmit={submitPasscode}>
+                <input
+                  type="password"
+                  value={passcodeInput}
+                  onChange={(e) => setPasscodeInput(e.target.value)}
+                  placeholder="Enter passcode"
+                  className="mb-4 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder-slate-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                  autoFocus
+                />
+                {passcodeError && <div className="mb-4 text-sm text-red-400">{passcodeError}</div>}
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => router.push('/')} className="flex-1 rounded-xl border border-white/20 bg-transparent px-4 py-3 text-white transition-colors hover:bg-white/5">
+                    Cancel
+                  </button>
+                  <button type="submit" className="flex-1 rounded-xl bg-violet-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-violet-500">
+                    Join Room
+                  </button>
+                </div>
+              </form>
             </div>
           </motion.div>
         )}
@@ -667,158 +500,120 @@ export default function RoomClient() {
           </div>
         )}
       </div>
-
-      {/* Right Sidebar: Chat & Participants */}
-      <div className="glass-panel room-sidebar" style={{ position: 'absolute', top: '80px', right: '20px', bottom: '20px', width: '320px', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.1)' }}>
-        
-        {/* Participants */}
-        <div style={{ padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Users size={16} color="var(--accent-secondary)" />
-              <span style={{ fontWeight: 600, fontSize: '14px' }}>Room Participants ({members.length || participants.length})</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              {members.slice(0, 4).map(m => (
-                <div 
-                  key={m.userId} 
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: '50%',
-                    background: '#1e293b',
-                    border: '1.5px solid #0f172a',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '10px',
-                    color: '#e2e8f0',
-                    boxShadow: '0 0 0 1.5px #10b981'
-                  }}
-                  title={m.username}
-                >
-                  {m.username.charAt(0).toUpperCase()}
-                </div>
-              ))}
-            </div>
+      <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-black">
+        {!isFullscreen && (
+          <div className="absolute left-5 top-5 z-50 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
+            <div className={`h-2 w-2 rounded-full ${connectionStatus === 'connected' ? 'bg-emerald-500' : connectionStatus === 'connecting' ? 'bg-amber-500' : 'bg-red-500'}`} />
+            <span className="text-xs capitalize text-white">{connectionStatus}</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '140px', overflowY: 'auto' }}>
-            {participants.map(p => (
-              <ParticipantItem 
-                key={p} 
-                userId={p} 
-                isHost={isHost} 
-                roomHostId={hostId} 
-                isMuted={mutedUsers.includes(p)} 
-                currentUserId={currentUserId} 
-                ws={ws.current} 
-                voiceStatus={voiceStates[p === currentUserId ? 'You' : p]}
-              />
-            ))}
-          </div>
-        </div>
+        )}
 
-        {/* Chat Messages */}
-        <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {messages.map((m, i) => (
-            <div key={i} style={{ background: m.user === currentUserId || m.user === userName ? 'rgba(229,9,20,0.15)' : 'rgba(255,255,255,0.05)', padding: '10px 14px', borderRadius: '12px', alignSelf: m.user === currentUserId || m.user === userName ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px', display: 'flex', gap: '6px', justifyContent: 'space-between' }}>
-                <span>{m.user === currentUserId || m.user === userName ? 'You' : `@${m.user}`}</span>
-                {m.timestamp && <span>{m.timestamp}</span>}
-              </div>
-              <div style={{ fontSize: '14px', wordBreak: 'break-word', color: '#f8fafc' }}>{m.text}</div>
-            </div>
-          ))}
-          <div ref={chatScrollRef} />
-        </div>
-
-        {/* Quick Emoji Macro Reaction Triggers */}
-        <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(15,23,42,0.4)', display: 'flex', justifyContent: 'space-around' }}>
-          {['🍿', '❤️', '😱', '😂', '🔥'].map(emoji => (
-            <button 
-              key={emoji} 
-              type="button"
-              onClick={() => handleSendReaction(emoji)}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px', transition: 'transform 0.1s' }}
-            >
-              {emoji}
+        {isHost && !isFullscreen && (
+          <div className="absolute left-32 top-5 z-50">
+            <button onClick={toggleLock} className="flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white transition-colors hover:bg-black/70">
+              {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
+              {isLocked ? 'Room Locked' : 'Room Unlocked'}
             </button>
-          ))}
-        </div>
-
-        {/* Chat Input */}
-        <form onSubmit={handleChat} style={{ padding: '16px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input 
-              type="text" 
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              placeholder={mutedUsers.includes(currentUserId) ? "You are muted" : "Type a message..."}
-              aria-label="Chat message"
-              className="input-glass"
-              style={{ padding: '10px 16px', fontSize: '14px', width: '100%', background: mutedUsers.includes(currentUserId) ? 'rgba(255,0,0,0.1)' : undefined }}
-              disabled={connectionStatus !== 'connected' || mutedUsers.includes(currentUserId)}
-            />
           </div>
-        </form>
+        )}
 
+        {!showPasscodeModal && (
+          <>
+            <VideoPlayer
+              isPlaying={isPlaying}
+              progress={progress}
+              onPlayPause={(playing: boolean) => { setIsPlaying(playing); emitSync(playing ? 'play' : 'pause'); }}
+              onSeek={(p: number) => { setProgress(p); emitSync('seek', p); }}
+              tracks={availableTracks}
+              activeTrackId={activeTrackId}
+              onTrackChange={handleTrackChange}
+            />
+
+            <div className="absolute right-80 top-5 z-50 max-w-xs">
+              <VoiceMeshOverlay
+                localStream={localStream}
+                peerStreams={peerStreams}
+                cameraActive={cameraActive}
+                micActive={micActive || isPttActive}
+                onToggleCamera={() => setCameraActive(!cameraActive)}
+                onToggleMic={() => setMicActive(!micActive)}
+                onSelectDevice={async () => { }}
+                onVoiceStatusChange={handleVoiceStatusChange}
+                shortcutKey={shortcutKey}
+                onChangeShortcut={changeShortcut}
+              />
+            </div>
+
+            {!isPlaying && !showPasscodeModal && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                <motion.button
+                  whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                  onClick={handlePlayPause} aria-label="Play video"
+                  className="flex h-20 w-20 items-center justify-center rounded-full bg-violet-600 shadow-[0_0_30px_rgba(124,58,237,0.5)] transition-colors hover:bg-violet-500"
+                >
+                  <Play size={40} fill="white" className="ml-1 text-white" />
+                </motion.button>
+              </div>
+            )}
+
+            <CinemaOverlay
+              isFullscreen={isFullscreen}
+              messages={messages}
+              chatInput={chatInput}
+              setChatInput={setChatInput}
+              handleChat={handleChat}
+              currentUserId={currentUserId}
+              isMuted={mutedUsers.includes(currentUserId)}
+              reactions={reactions}
+              onSendReaction={handleSendReaction}
+              isChatVisible={isChatVisible}
+              setChatVisible={setChatVisible}
+            />
+
+            {/* Video Controls Bottom Bar */}
+            <div className="glass-panel absolute bottom-5 left-5 right-5 z-50 flex items-center gap-5 rounded-xl border border-white/10 bg-black/60 px-5 py-4 transition-all duration-300" style={{ right: isFullscreen ? '1.25rem' : '21rem' }}>
+              <button onClick={handlePlayPause} aria-label={isPlaying ? 'Pause' : 'Play'} className="text-white hover:text-violet-400">
+                {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
+              </button>
+              <div onClick={handleSeek} className="flex-1 h-1.5 cursor-pointer rounded-full bg-white/20">
+                <div style={{ width: `${progress}%` }} className="h-full rounded-full bg-violet-600 transition-all duration-100" />
+              </div>
+              <span className="font-mono text-sm text-slate-300">00:00 / 02:45:00</span>
+              <button aria-label="Volume" className="text-white hover:text-violet-400"><Volume2 size={20} /></button>
+              <button onClick={toggleFullscreen} aria-label="Fullscreen" className="text-white hover:text-violet-400"><Maximize size={20} /></button>
+            </div>
+          </>
+        )}
       </div>
 
+      {/* Chat Sidebar Component */}
+      <AnimatePresence>
+        {isChatVisible && !showPasscodeModal && (
+          <ChatSidebar
+            messages={messages}
+            participants={members}
+            currentUserId={currentUserId}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            onSendMessage={handleChat}
+            isMuted={mutedUsers.includes(currentUserId)}
+            connectionStatus={connectionStatus}
+            onClose={() => setChatVisible(false)}
+            isFullscreen={isFullscreen}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Toggle Chat Button (when hidden) */}
+      {!isChatVisible && !showPasscodeModal && (
+        <button
+          onClick={() => setChatVisible(true)}
+          className="absolute right-5 top-24 z-50 rounded-xl border border-white/10 bg-slate-900/80 p-3 text-white backdrop-blur-md transition-colors hover:bg-slate-800"
+          aria-label="Open chat"
+        >
+          <MessageSquare size={20} />
+        </button>
+      )}
     </main>
   );
-}
-
-// Subcomponent for participant to isolate dropdown state
-function ParticipantItem({ userId, isHost, roomHostId, isMuted, currentUserId, ws, voiceStatus }: { userId: string, isHost: boolean, roomHostId: string | null, isMuted: boolean, currentUserId: string, ws: WebSocket | null, voiceStatus?: VoiceStatus }) {
-    const [showMenu, setShowMenu] = useState(false);
-    
-    const isThisUserHost = userId === roomHostId;
-    const isMe = userId === currentUserId;
-
-    const handleAction = (action: string) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        ws.send(JSON.stringify({
-            type: action,
-            payload: { user_id: userId, muted: !isMuted } // payload reused
-        }));
-        setShowMenu(false);
-    };
-
-    return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', position: 'relative' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: '13px', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>
-                    {userId} {isMe && '(You)'}
-                </span>
-                {isThisUserHost && <span style={{ fontSize: '10px', background: 'var(--accent-primary)', padding: '2px 6px', borderRadius: '4px', color: 'white' }}>Host</span>}
-                
-                {voiceStatus === 'muted' && <span className="text-[10px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded" aria-label="Muted">Muted</span>}
-                {voiceStatus === 'active' && <span className="text-[10px] bg-slate-500/20 text-slate-300 px-1.5 py-0.5 rounded" aria-label="Active microphone">Active</span>}
-                {voiceStatus === 'speaking' && <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded animate-pulse" aria-label="Speaking">Speaking</span>}
-                
-                {isMuted && <Volume2 size={12} color="#ef4444" />}
-            </div>
-            
-            {isHost && !isMe && (
-                <div style={{ position: 'relative' }}>
-                    <button onClick={() => setShowMenu(!showMenu)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-                        <MoreVertical size={16} />
-                    </button>
-                    {showMenu && (
-                        <div style={{ position: 'absolute', right: 0, top: '100%', background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '4px', zIndex: 10, minWidth: '120px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
-                            <button onClick={() => handleAction('TRANSFER_HOST')} style={{ width: '100%', textAlign: 'left', padding: '8px 12px', background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '13px', borderRadius: '4px' }} className="menu-btn">Make Host</button>
-                            <button onClick={() => handleAction('MUTE_USER')} style={{ width: '100%', textAlign: 'left', padding: '8px 12px', background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '13px', borderRadius: '4px' }} className="menu-btn">{isMuted ? 'Unmute' : 'Mute'}</button>
-                            <button onClick={() => handleAction('KICK_USER')} style={{ width: '100%', textAlign: 'left', padding: '8px 12px', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '13px', borderRadius: '4px' }} className="menu-btn">Remove</button>
-                        </div>
-                    )}
-                </div>
-            )}
-            
-            {showMenu && <div style={{ position: 'fixed', inset: 0, zIndex: 9 }} onClick={() => setShowMenu(false)} />}
-            
-            <style jsx>{`
-                .menu-btn:hover { background: rgba(255,255,255,0.1) !important; }
-            `}</style>
-        </div>
-    );
 }

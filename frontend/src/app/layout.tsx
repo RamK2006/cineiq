@@ -6,7 +6,7 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import { ClerkProvider } from '@clerk/nextjs';
 import CustomCursor from '@/components/CustomCursor';
 import ScrollToTopButton from '@/components/ScrollToTopButton';
-import InstallBanner from '@/components/InstallBanner';
+import InstallBanner from '@/components/pwa/InstallPrompt';
 
 const outfit = Outfit({
   subsets: ['latin'],
@@ -26,6 +26,14 @@ export const metadata: Metadata = {
   title: 'CINEIQ | Discover Movies Together',
   description: 'AI-powered movie recommendations and social discovery platform.',
   manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'CINEIQ',
+  },
+  formatDetection: {
+    telephone: false,
+  },
 };
 
 export default function RootLayout({
@@ -42,6 +50,8 @@ export default function RootLayout({
       <html lang="en" className={`${outfit.variable} ${inter.variable}`}>
         <head>
           <meta name="theme-color" content="#7c3aed" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
           <script
             dangerouslySetInnerHTML={{
               __html: `
@@ -67,9 +77,27 @@ export default function RootLayout({
           <CustomCursor />
           <ScrollToTopButton />
           <InstallBanner />
+          
+          {/* Service Worker Registration for PWA Offline Caching */}
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `
+                if ('serviceWorker' in navigator) {
+                  window.addEventListener('load', function() {
+                    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                      .then(function(registration) {
+                        console.log('CineIQ SW registered: ', registration);
+                      })
+                      .catch(function(registrationError) {
+                        console.log('CineIQ SW registration failed: ', registrationError);
+                      });
+                  });
+                }
+              `,
+            }}
+          />
         </body>
       </html>
     </ClerkProvider>
   );
 }
-
