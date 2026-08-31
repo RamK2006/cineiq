@@ -68,3 +68,13 @@ jobs:
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_bG95YWwtZG9nLTIuY2xlcmsuYWNjb3VudHMuZGV2JA"
           NODE_ENV: production
         run: npm run build
+
+      - name: Install Playwright Browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E Tests
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_bG95YWwtZG9nLTIuY2xlcmsuYWNjb3VudHMuZGV2JA"
+        run: npm run test:e2e
