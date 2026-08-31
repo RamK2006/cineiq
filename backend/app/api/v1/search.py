@@ -360,3 +360,90 @@ async def semantic_search(
             logger.error("tmdb_search_failed", error=str(e))
 
     return SearchResponse(query=q, results=results)
+
+# ==============================================================================
+# --- NEW: CINEBOT ASSISTANT ENDPOINT START ---
+# ==============================================================================
+
+class CineBotRequest(BaseModel):
+    message: str
+    history: List[Dict[str, str]] = []
+
+class CineBotMovieResult(BaseModel):
+    id: str
+    title: str
+    overview: str
+    poster_path: Optional[str] = None
+    reasoning: str
+
+class CineBotResponseModel(BaseModel):
+    conversational_reply: str
+    recommendations: List[CineBotMovieResult]
+
+@router.post("/assistant", response_model=CineBotResponseModel)
+async def cinebot_assistant(
+    request: CineBotRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    AI conversational movie assistant endpoint.
+    Accepts conversation history and user message, queries Gemini, and returns structured recommendations.
+    """
+    try:
+        # Fetch a subset of movies to provide context to the LLM (e.g., top 50 popular movies)
+        # In a production environment, this would be a vector search based on the user's message.
+        stmt = select(Movie).order_by(Movie.popularity.desc()).limit(50)
+        result = await db.execute(stmt)
+        movies = result.scalars().all()
+        
+        # Format movies context for the LLM
+        movies_context = "\n".join([
+            f"ID: {m.id}, Title: {m.title}, Genres: {', '.join(m.genres) if m.genres else 'Unknown'}, Overview: {m.overview[:150]}..."
+            for m in movies
+        ])
+
+        # Call the LLM service
+        from app.services.llm import generate_cinebot_response
+        llm_response = await generate_cinebot_response(
+            conversation_history=request.history,
+            user_message=request.message,
+            available_movies_context=movies_context
+        )
+
+        if not llm_response:
+            raise HTTPException(status_code=500, detail="Failed to generate AI response")
+
+        # Map LLM recommendations to actual movie data from DB for accurate poster paths, etc.
+        final_recommendations = []
+        movie_dict = {str(m.id): m for m in movies}
+        
+        for rec in llm_response.recommendations:
+            db_movie = movie_dict.get(str(rec.id))
+            if db_movie:
+                final_recommendations.append(CineBotMovieResult(
+                    id=str(db_movie.id),
+                    title=db_movie.title,
+                    overview=db_movie.overview,
+                    poster_path=db_movie.poster_path,
+                    reasoning=rec.reasoning
+                ))
+            else:
+                # Fallback if LLM hallucinated an ID not in our top 50
+                final_recommendations.append(CineBotMovieResult(
+                    id=rec.id,
+                    title=rec.title,
+                    overview="Details not available in current context.",
+                    poster_path=None,
+                    reasoning=rec.reasoning
+                ))
+
+        return CineBotResponseModel(
+            conversational_reply=llm_response.conversational_reply,
+            recommendations=final_recommendations
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("cinebot_endpoint_failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error during AI assistant generation")
