@@ -1,3 +1,6 @@
+from app.core.waf import waf_middleware
+from app.core.csrf import csrf_middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 import time
 import uuid
@@ -135,6 +138,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=csrf_middleware)
+app.add_middleware(BaseHTTPMiddleware, dispatch=waf_middleware)
+
 
 # 2. Custom Security Headers Middleware for OWASP Compliance
 @app.middleware("http")

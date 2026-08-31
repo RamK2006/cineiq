@@ -55,7 +55,7 @@ const nextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://cineiq.com; frame-ancestors 'none';"
+            value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://unsplash.com https://images.unsplash.com https://image.tmdb.org https://img.clerk.com https://images.clerk.dev; connect-src 'self' https://cineiq.com wss://cineiq.com ws://localhost:* http://localhost:*; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; report-uri /api/v1/security/csp-report;"
           },
           {
             key: 'X-Content-Type-Options',
