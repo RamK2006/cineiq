@@ -108,6 +108,11 @@ export async function fetchMovie(movieId: string): Promise<MovieDetail> {
   return apiRequest(`/movie/${encodeURIComponent(movieId)}`);
 }
 
+export async function fetchSimilarMovies(movieId: string, limit: number = 8): Promise<RecommendationResponse> {
+  return apiRequest(`/movie/${encodeURIComponent(movieId)}/similar?limit=${limit}`);
+}
+
+
 export async function fetchPersonalizedMovies(limit: number = 20): Promise<RecommendationResponse> {
   return apiRequest(`/recommend/personalized?limit=${limit}`);
 }
