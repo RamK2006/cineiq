@@ -100,6 +100,11 @@ export async function fetchPersonalizedMovies(limit: number = 20): Promise<Recom
   return apiRequest(`/recommend/personalized?limit=${limit}`);
 }
 
+export async function fetchMoviesByEmotion(emotion: string, limit: number = 10): Promise<RecommendationResponse> {
+  return apiRequest(`/recommend/by-emotion?emotion=${encodeURIComponent(emotion)}&limit=${limit}`);
+}
+
+
 export async function fetchProfileStats(token: string): Promise<ProfileStats> {
   const response = await fetch(`${API_BASE_URL}/profile/stats`, {
     method: 'GET',
