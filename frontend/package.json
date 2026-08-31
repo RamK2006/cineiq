@@ -37,6 +37,8 @@
     "eslint-config-next": "^15.0.0",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
-    "typescript": "^5.6.0"
+    "next-pwa": "^5.6.0",
+    "typescript": "^5.6.0",
+    "workbox-webpack-plugin": "^7.0.0"
   }
 }
