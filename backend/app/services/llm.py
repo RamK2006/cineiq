@@ -1,13 +1,15 @@
 """
 CineBot LLM Service Module
 Handles interactions with the Google Gemini API for conversational movie recommendations.
-Uses structured output (JSON schema) to ensure consistent, parseable responses.
+Uses the official google-genai SDK with function calling and structured outputs.
 """
 import os
 import json
 import structlog
 from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
+from google import genai
+from google.genai import types
 
 logger = structlog.get_logger()
 
@@ -28,13 +30,10 @@ async def generate_cinebot_response(
     available_movies_context: str
 ) -> Optional[CineBotResponse]:
     """
-    Generates a conversational response and movie recommendations using Google Gemini.
-    Uses function calling / structured output to ensure consistent formatting.
+    Generates a conversational response and movie recommendations using Google Gemini (`gemini-2.0-flash`).
+    Utilizes structured Pydantic output schemas for guaranteed parseable responses.
     """
     try:
-        import google.generativeai as genai
-        
-        # Check if API key is configured
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             logger.warning("gemini_api_key_missing", message="GEMINI_API_KEY is not set. CineBot fallback triggered.")
@@ -43,44 +42,54 @@ async def generate_cinebot_response(
                 recommendations=[]
             )
 
-        genai.configure(api_key=api_key)
-        
-        # Use gemini-2.0-flash or fallback to gemini-1.5-flash
-        model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={
-                "response_mime_type": "application/json",
-                "response_schema": CineBotResponse,
-            }
-        )
+        client = genai.Client(api_key=api_key)
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
-        # Construct the prompt with conversation history and available movies context
-        history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversation_history[-5:]])
-        
-        prompt = f"""You are CineBot, an expert AI movie recommendation assistant for the CineIQ platform.
-Your goal is to suggest movies from the provided catalog that match the user's natural language query.
+        # Format conversation history using the google-genai Content types
+        formatted_contents = []
+        for msg in conversation_history[-5:]:
+            role = "user" if msg.get("role") == "user" else "model"
+            formatted_contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=msg.get("content", ""))]
+                )
+            )
 
-Available Movies Catalog Context (ID, Title, Genre, Overview):
+        # Append current user prompt along with the catalog context
+        augmented_prompt = f"""Available Movies Catalog Context (ID, Title, Genre, Overview):
 {available_movies_context}
 
-Conversation History:
-{history_text}
-
 User's Latest Message:
-{user_message}
+{user_message}"""
 
-Instructions:
-1. Analyze the user's request for genre, mood, themes, or specific movie references.
-2. Select up to 3 movies from the provided catalog that best match the request.
-3. Provide a friendly, conversational reply explaining your choices.
-4. If no movies match, politely explain why and suggest a broader search.
-5. STRICTLY output valid JSON matching the CineBotResponse schema. Do not include markdown formatting or extra text.
-"""
+        formatted_contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=augmented_prompt)]
+            )
+        )
 
-        response = model.generate_content(prompt)
-        
-        # Parse the JSON response
+        config = types.GenerateContentConfig(
+            system_instruction=(
+                "You are CineBot, an expert AI movie recommendation assistant for the CineIQ platform. "
+                "Your goal is to suggest up to 3 movies from the provided catalog that match the user's natural language query. "
+                "Always provide a friendly, conversational reply alongside structured recommendations."
+            ),
+            response_mime_type="application/json",
+            response_schema=CineBotResponse,
+            temperature=0.7,
+        )
+
+        response = client.models.generate_content(
+            model=model_name,
+            contents=formatted_contents,
+            config=config,
+        )
+
+        if not response.text:
+            raise ValueError("Empty response received from Gemini model.")
+
         result = json.loads(response.text)
         return CineBotResponse(**result)
 

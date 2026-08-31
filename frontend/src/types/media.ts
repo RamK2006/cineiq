@@ -1,12 +1,23 @@
+export type SubtitleFormat = 'vtt' | 'srt';
+export type SubtitleKind = 'subtitles' | 'captions' | 'descriptions' | 'chapters' | 'metadata';
+
 export interface SubtitleTrackData {
   id: string;
-  language: string;
   label: string;
-  src?: string;
-  kind?: string;
-  format?: string;
+  language: string;
+  src: string;
+  kind?: SubtitleKind;
+  format?: SubtitleFormat;
+  default?: boolean;
 }
 
+export type SubtitleFontSize = 'small' | 'medium' | 'large';
+export type SubtitleBackgroundOpacity = 'low' | 'medium' | 'high';
+
+export interface SubtitlePreferences {
+  fontSize: SubtitleFontSize;
+  backgroundOpacity: SubtitleBackgroundOpacity;
+}
 
 export interface MediaSource {
   id: string;
