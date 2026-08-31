@@ -5,6 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, Maximize, Volume2, Users, MoreVertical, Lock, Unlock, LogOut } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
+import VideoPlayer from '@/components/VideoPlayer';
+import CinemaOverlay, { Reaction } from '@/components/CinemaOverlay';
+import { SubtitleTrackData } from '@/types/media';
 
 export default function RoomClient() {
   const params = useParams();
@@ -33,7 +36,17 @@ export default function RoomClient() {
   const [passcodeInput, setPasscodeInput] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
   const [kicked, setKicked] = useState(false);
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isChatVisible, setChatVisible] = useState(true);
+  const [reactions, setReactions] = useState<Reaction[]>([]);
   
+  const roomVideoAreaRef = useRef<HTMLDivElement>(null);
+  
+  const availableTracks: SubtitleTrackData[] = [
+    { id: 'en', label: 'English', language: 'en', src: '/subtitles/en.srt', kind: 'subtitles', format: 'srt' },
+    { id: 'es', label: 'Spanish', language: 'es', src: '/subtitles/es.vtt', kind: 'subtitles', format: 'vtt' }
+  ];
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const expectedDisconnect = useRef<boolean>(false);
@@ -104,6 +117,15 @@ export default function RoomClient() {
           case 'chat':
             setMessages(prev => [...prev, { user: message.user || 'Unknown', text: message.payload?.text || '' }]);
             break;
+          case 'reaction':
+            if (message.payload?.emoji) {
+                const newReaction: Reaction = { id: Math.random().toString(), emoji: message.payload.emoji, timestamp: Date.now() };
+                setReactions(prev => [...prev, newReaction]);
+                setTimeout(() => {
+                    setReactions(current => current.filter(r => r.id !== newReaction.id));
+                }, 3000);
+            }
+            break;
           case 'user_joined':
             setParticipants(prev => {
                if (!prev.includes(message.user)) return [...prev, message.user];
@@ -172,7 +194,7 @@ export default function RoomClient() {
     };
   }, [connectWebSocket]);
 
-  const emitSync = (action: 'play' | 'pause' | 'seek', newProgress?: number) => {
+  const emitSync = useCallback((action: 'play' | 'pause' | 'seek', newProgress?: number) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({
         type: action,
@@ -181,13 +203,13 @@ export default function RoomClient() {
         }
       }));
     }
-  };
+  }, [progress]);
 
-  const handlePlayPause = () => {
+  const handlePlayPause = useCallback(() => {
     const newIsPlaying = !isPlaying;
     setIsPlaying(newIsPlaying);
     emitSync(newIsPlaying ? 'play' : 'pause');
-  };
+  }, [isPlaying, emitSync]);
   
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -230,7 +252,69 @@ export default function RoomClient() {
       }
   };
   
+  const handleTrackChange = (trackId: string | null) => {
+      setActiveTrackId(trackId);
+      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({ type: 'SUBTITLE_TRACK_CHANGED', payload: { track_id: trackId } }));
+      }
+  };
+
   const isHost = currentUserId === hostId;
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      if (roomVideoAreaRef.current?.requestFullscreen) {
+        roomVideoAreaRef.current.requestFullscreen().catch(err => {
+          console.error(`Error attempting to enable fullscreen: ${err.message}`);
+        });
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) {
+        return;
+      }
+      
+      if (e.key.toLowerCase() === 'f') {
+        toggleFullscreen();
+      } else if (e.key.toLowerCase() === 'c') {
+        if (document.fullscreenElement) {
+            setChatVisible(prev => !prev);
+        }
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        handlePlayPause();
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [toggleFullscreen, handlePlayPause]);
+  
+  const handleSendReaction = (emoji: string) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'reaction', payload: { emoji } }));
+    }
+    const newReaction: Reaction = { id: Math.random().toString(), emoji, timestamp: Date.now() };
+    setReactions(prev => [...prev, newReaction]);
+    setTimeout(() => {
+        setReactions(current => current.filter(r => r.id !== newReaction.id));
+    }, 3000);
+  };
 
   if (kicked) {
       return (
@@ -281,15 +365,17 @@ export default function RoomClient() {
       </AnimatePresence>
 
       {/* Video Area */}
-      <div className="room-video-area" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      <div ref={roomVideoAreaRef} className="room-video-area" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: 'black' }}>
         
         {/* Connection Status Indicator */}
-        <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: 20 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: connectionStatus === 'connected' ? '#10b981' : connectionStatus === 'connecting' ? '#f59e0b' : '#ef4444' }} />
-          <span style={{ fontSize: 12, color: 'white', textTransform: 'capitalize' }}>{connectionStatus}</span>
-        </div>
+        {!isFullscreen && (
+          <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: 20 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: connectionStatus === 'connected' ? '#10b981' : connectionStatus === 'connecting' ? '#f59e0b' : '#ef4444' }} />
+            <span style={{ fontSize: 12, color: 'white', textTransform: 'capitalize' }}>{connectionStatus}</span>
+          </div>
+        )}
         
-        {isHost && (
+        {isHost && !isFullscreen && (
             <div style={{ position: 'absolute', top: 20, left: 140, zIndex: 50 }}>
                 <button onClick={toggleLock} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: 20, color: 'white', border: 'none', cursor: 'pointer' }}>
                     {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
@@ -298,27 +384,34 @@ export default function RoomClient() {
             </div>
         )}
 
-        <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: '#111827', color: 'var(--text-secondary)' }}>
-          No licensed playback source is configured for this room.
-        </div>
-        
-        {/* Play/Pause Overlay animation */}
-        {!isPlaying && !showPasscodeModal && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }}>
-            <motion.button 
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={handlePlayPause}
-              aria-label="Play video"
-              style={{ background: 'var(--accent-primary)', border: 'none', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 0 30px rgba(229,9,20,0.5)' }}
-            >
-              <Play size={40} fill="white" color="white" style={{ marginLeft: '6px' }} />
-            </motion.button>
-          </div>
+        {!showPasscodeModal && (
+          <VideoPlayer
+            isPlaying={isPlaying}
+            progress={progress}
+            onPlayPause={(playing: boolean) => { setIsPlaying(playing); emitSync(playing ? 'play' : 'pause'); }}
+            onSeek={(p: number) => { setProgress(p); emitSync('seek', p); }}
+            tracks={availableTracks}
+            activeTrackId={activeTrackId}
+            onTrackChange={handleTrackChange}
+          />
         )}
-
+        
+        <CinemaOverlay 
+          isFullscreen={isFullscreen} 
+          messages={messages} 
+          chatInput={chatInput} 
+          setChatInput={setChatInput} 
+          handleChat={handleChat} 
+          currentUserId={currentUserId} 
+          isMuted={mutedUsers.includes(currentUserId)} 
+          reactions={reactions} 
+          onSendReaction={handleSendReaction} 
+          isChatVisible={isChatVisible}
+          setChatVisible={setChatVisible}
+        />
+        
         {/* Video Controls Bottom Bar */}
-        <div className="glass-panel room-video-controls" style={{ position: 'absolute', bottom: '20px', left: '20px', right: '320px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <div className="glass-panel room-video-controls" style={{ position: 'absolute', bottom: '20px', left: '20px', right: isFullscreen ? '20px' : '320px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px', zIndex: 50, transition: 'right 0.3s' }}>
           <button onClick={handlePlayPause} aria-label={isPlaying ? 'Pause video' : 'Play video'} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
             {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
           </button>
@@ -332,7 +425,7 @@ export default function RoomClient() {
           <button aria-label="Adjust volume" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
             <Volume2 size={20} />
           </button>
-          <button aria-label="Toggle fullscreen" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
+          <button onClick={toggleFullscreen} aria-label="Toggle fullscreen" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
             <Maximize size={20} />
           </button>
         </div>
