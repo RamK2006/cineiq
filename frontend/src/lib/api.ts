@@ -207,4 +207,3 @@ export async function fetchTopClickedMovies(hours = 24, limit = 10) {
   return apiRequest(`/analytics/top-clicked?hours=${hours}&limit=${limit}`);
 }
 
-

@@ -271,6 +271,7 @@ app.include_router(api_router, prefix="/api/v1")
 
 app.websocket("/ws/room/{room_id}/{user_id}")(room_websocket_signaling_endpoint)
 
+
 # Instrument database queries via SQLAlchemy events on the sync engine
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
 def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):

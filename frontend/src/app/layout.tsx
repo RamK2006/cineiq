@@ -6,6 +6,7 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import { ClerkProvider } from '@clerk/nextjs';
 import CustomCursor from '@/components/CustomCursor';
 import ScrollToTopButton from '@/components/ScrollToTopButton';
+import InstallBanner from '@/components/InstallBanner';
 
 const outfit = Outfit({
   subsets: ['latin'],
@@ -24,6 +25,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'CINEIQ | Discover Movies Together',
   description: 'AI-powered movie recommendations and social discovery platform.',
+  manifest: '/manifest.json',
 };
 
 export default function RootLayout({
@@ -39,6 +41,7 @@ export default function RootLayout({
     <ClerkProvider publishableKey={publishableKey}>
       <html lang="en" className={`${outfit.variable} ${inter.variable}`}>
         <head>
+          <meta name="theme-color" content="#7c3aed" />
           <script
             dangerouslySetInnerHTML={{
               __html: `
@@ -63,8 +66,10 @@ export default function RootLayout({
           </ThemeProvider>
           <CustomCursor />
           <ScrollToTopButton />
+          <InstallBanner />
         </body>
       </html>
     </ClerkProvider>
   );
 }
+

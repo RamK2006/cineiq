@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.core.security import CSP_DIRECTIVES
 
-
 client = TestClient(app)
+
 
 def test_security_headers_present():
     response = client.get("/health")

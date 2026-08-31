@@ -10,6 +10,7 @@ import { usePushToTalk } from '@/hooks/usePushToTalk';
 import { VoiceStatus } from '@/hooks/useAudioAnalyzer';
 
 
+
 export default function RoomClient() {
   const params = useParams();
   const router = useRouter();
@@ -64,9 +65,11 @@ export default function RoomClient() {
     }
   }, [localStream, micActive, isPttActive]);
 
+
   const meshWsRef = useRef<WebSocket | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const localUserIdRef = useRef<string>(user?.id || `user_${Math.floor(Math.random() * 10000)}`);
+
 
   const triggerFloatingEmoji = useCallback((emoji: string) => {
     const id = Date.now() + Math.random();
@@ -608,6 +611,7 @@ export default function RoomClient() {
             onVoiceStatusChange={handleVoiceStatusChange}
             shortcutKey={shortcutKey}
             onChangeShortcut={changeShortcut}
+
           />
         </div>
 

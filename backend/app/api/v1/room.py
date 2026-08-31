@@ -174,6 +174,7 @@ async def room_websocket_signaling_endpoint(
 
 class WSMessage(BaseModel):
     type: Literal["play", "pause", "seek", "chat", "submit_passcode", "TRANSFER_HOST", "KICK_USER", "MUTE_USER", "LOCK_ROOM", "UNLOCK_ROOM"]
+
     payload: Optional[Any] = None
 
 class CreateRoomRequest(BaseModel):
