@@ -8,30 +8,30 @@ import { Mic, Search, Sparkles, Filter, X } from 'lucide-react';
 import EmptyState from '../../components/EmptyState';
 import { apiRequest } from '../../lib/api';
 import { searchCatalog } from '../../lib/catalog';
+import CineBotDrawer from './CineBotDrawer'; // --- NEW: Import CineBotDrawer ---
 
 type Result = { id: string; title: string; overview: string; poster_path?: string | null; similarity_score: number };
 type Suggestion = { id: string; title: string; poster_path?: string | null; year?: number | null };
 
 const AVAILABLE_GENRES = [
-  'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 
-  'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Music', 'Mystery', 
+  'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary',
+  'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Music', 'Mystery',
   'Romance', 'Science Fiction', 'Thriller', 'War', 'Western'
 ];
 
 function SearchContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Result[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-
+  
   // Suggestions state
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchContainerRef = useRef<HTMLDivElement>(null);
-  
+
   // Filter state
   const [showFilters, setShowFilters] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
@@ -39,6 +39,9 @@ function SearchContent() {
   const [yearFrom, setYearFrom] = useState<number | ''>('');
   const [yearTo, setYearTo] = useState<number | ''>('');
   const [sortBy, setSortBy] = useState<string>('popularity');
+
+  // --- NEW: CineBot State ---
+  const [isCineBotOpen, setIsCineBotOpen] = useState(false);
 
   // Fetch instant suggestions on query change
   useEffect(() => {
@@ -110,7 +113,7 @@ function SearchContent() {
   }, [searchParams]);
 
   const toggleGenre = (genre: string) => {
-    setSelectedGenres(prev => 
+    setSelectedGenres(prev =>
       prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
     );
   };
@@ -144,10 +147,10 @@ function SearchContent() {
   }
 
   async function executeSearch(
-    q: string, 
-    genres: string[], 
-    rating: string | null, 
-    yFrom: string | null, 
+    q: string,
+    genres: string[],
+    rating: string | null,
+    yFrom: string | null,
     yTo: string | null,
     sort: string | null
   ) {
@@ -163,9 +166,7 @@ function SearchContent() {
       if (yTo) params.append('year_to', yTo);
       if (sort) params.append('sort_by', sort);
 
-      const response = (await apiRequest(`/search/semantic?${params.toString()}`)) as {
-        results: Result[];
-      };
+      const response = (await apiRequest(`/search/semantic?${params.toString()}`)) as { results: Result[] };
       if (response && response.results) {
         setResults(response.results);
         setIsSearching(false);
@@ -191,7 +192,7 @@ function SearchContent() {
     event.preventDefault();
     setShowSuggestions(false);
     if (!query.trim() && selectedGenres.length === 0 && !yearFrom && !yearTo && minRating === 0) return;
-    
+
     const params = new URLSearchParams();
     if (query.trim()) params.append('q', query.trim());
     selectedGenres.forEach(g => params.append('genre', g));
@@ -212,7 +213,7 @@ function SearchContent() {
           </div>
           <h1 style={{ fontSize: 48, marginTop: 8 }}>Describe what you want to watch</h1>
         </div>
-        
+
         <form onSubmit={handleSearch} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div ref={searchContainerRef} style={{ position: 'relative', width: '100%' }}>
             <div className="glass-panel" style={{ display: 'flex', padding: 8, gap: 8 }}>
@@ -234,8 +235,8 @@ function SearchContent() {
                 className="search-input"
                 style={{ flex: 1 }}
               />
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setShowFilters(!showFilters)}
                 className={`btn ${showFilters ? 'btn-primary' : 'btn-glass'}`}
                 style={{ padding: '8px 12px' }}
@@ -344,7 +345,6 @@ function SearchContent() {
             )}
           </div>
 
-
           {showFilters && (
             <div className="glass-panel" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -394,7 +394,6 @@ function SearchContent() {
                     style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
                   />
                 </div>
-                
                 <div>
                   <label style={{ display: 'block', marginBottom: 8, fontSize: 14, color: 'var(--text-secondary)' }}>Sort By</label>
                   <select
@@ -491,6 +490,44 @@ function SearchContent() {
           )}
         </section>
       </div>
+
+      {/* --- NEW: CineBot Floating Action Button --- */}
+      <button
+        onClick={() => setIsCineBotOpen(true)}
+        style={{
+          position: 'fixed',
+          bottom: 32,
+          right: 32,
+          zIndex: 40,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          borderRadius: 9999,
+          background: 'var(--accent-primary, #7c3aed)',
+          padding: '12px 24px',
+          fontWeight: 600,
+          color: 'white',
+          boxShadow: '0 10px 25px -5px rgba(124, 58, 237, 0.4)',
+          border: 'none',
+          cursor: 'pointer',
+          transition: 'transform 0.2s, background 0.2s',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'scale(1.05)';
+          e.currentTarget.style.background = '#6d28d9';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'scale(1)';
+          e.currentTarget.style.background = 'var(--accent-primary, #7c3aed)';
+        }}
+        aria-label="Open CineBot AI Assistant"
+      >
+        <Sparkles size={20} />
+        <span>CineBot</span>
+      </button>
+
+      {/* --- NEW: CineBot Drawer Component --- */}
+      <CineBotDrawer isOpen={isCineBotOpen} onClose={() => setIsCineBotOpen(false)} />
     </main>
   );
 }

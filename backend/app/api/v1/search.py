@@ -5,7 +5,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 import json
 import hashlib
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from sqlalchemy import or_, and_, cast, String, extract
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_redis, get_db
 from app.db.models import Movie
+from app.services.llm import generate_cinebot_response
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/search", tags=["search"])
@@ -44,7 +45,6 @@ class SuggestItem(BaseModel):
     title: str
     poster_path: Optional[str] = None
     year: Optional[int] = None
-
 
 
 async def extract_keywords_with_gemini(query: str) -> str:
@@ -142,7 +142,6 @@ async def suggest_search(
 
 
 @router.get("/semantic", response_model=SearchResponse)
-
 async def semantic_search(
     request: Request,
     q: str = Query("", description="Natural language search query"),
@@ -158,9 +157,8 @@ async def semantic_search(
     Perform semantic search using Qdrant vector search, Gemini keyword extraction, PostgreSQL DB search, or TMDB search fallback.
     """
     has_filters = bool(genres or min_rating is not None or year_from is not None or year_to is not None)
-    # Try Hybrid Search first if query is provided
+    
     if q:
-
         try:
             from app.services.hybrid_search import HybridSearchEngine
             engine = HybridSearchEngine(db)
@@ -196,18 +194,19 @@ async def semantic_search(
         except Exception as e:
             logger.warning("hybrid_search_failed_falling_back", error=str(e))
 
-    # 1. Try Qdrant vector search if enabled (skip if filters are applied)
     if settings.qdrant_url and not has_filters and q:
         try:
-            from sentence_transformers import SentenceTransformer
-            from qdrant_client import QdrantClient
-
-            model = SentenceTransformer('all-MiniLM-L6-v2')
-            query_vector = model.encode(q).tolist()
-
-            client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-            if client.collection_exists("movies"):
-                qdrant_results = client.search(
+            from app.services.embeddings import get_embedder
+            from qdrant_client import AsyncQdrantClient
+            
+            embedder = get_embedder()
+            query_vector = embedder.embed_text(q)
+            
+            client = AsyncQdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+            collections = await client.get_collections()
+            
+            if any(c.name == "movies" for c in collections.collections) and query_vector:
+                qdrant_results = await client.search(
                     collection_name="movies",
                     query_vector=query_vector,
                     limit=limit
@@ -217,10 +216,10 @@ async def semantic_search(
                     logger.info("qdrant_search_success", query=q, hits=len(qdrant_results))
                     results = [
                         SearchResult(
-                            id=str(hit.payload.get("movie_id", hit.id)),
+                            id=str(hit.payload.get("original_movie_id", hit.id)),
                             title=hit.payload.get("title", "Unknown"),
-                            overview=hit.payload.get("description", ""),
-                            poster_path=hit.payload.get("poster_path"),
+                            overview=hit.payload.get("overview", ""),
+                            poster_path=None,
                             similarity_score=float(hit.score)
                         ) for hit in qdrant_results
                     ]
@@ -228,12 +227,10 @@ async def semantic_search(
         except Exception as e:
             logger.warning("qdrant_search_failed_falling_back", error=str(e))
 
-    # 2. Extract keywords using Gemini (if key configured)
     keywords = q
     if settings.gemini_api_key:
         keywords = await extract_keywords_with_gemini(q)
 
-    # 3. Try PostgreSQL DB search
     cleaned_q = sanitize_query(keywords)
     words = [w for w in re.split(r'\s+', cleaned_q) if len(w) > 1]
     if not words and q:
@@ -297,7 +294,6 @@ async def semantic_search(
     except Exception as e:
         logger.warning("postgres_search_failed_falling_back", error=str(e))
 
-    # 4. Fallback to TMDB Search
     if has_filters:
         return SearchResponse(query=q, results=results if 'results' in locals() else [])
 
@@ -357,3 +353,83 @@ async def semantic_search(
             logger.error("tmdb_search_failed", error=str(e))
 
     return SearchResponse(query=q, results=results)
+
+
+class CineBotRequest(BaseModel):
+    message: str
+    history: List[dict] = []
+
+
+class CineBotMovieResult(BaseModel):
+    id: str
+    title: str
+    overview: str
+    poster_path: Optional[str] = None
+    reasoning: str
+
+
+class CineBotResponseModel(BaseModel):
+    conversational_reply: str
+    recommendations: List[CineBotMovieResult]
+
+
+@router.post("/assistant", response_model=CineBotResponseModel)
+async def cinebot_assistant(
+    request: CineBotRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    AI conversational movie assistant endpoint (`/api/v1/search/assistant`).
+    Accepts conversation history and user message, queries Gemini using structured schema output, and returns recommendations.
+    """
+    try:
+        stmt = select(Movie).order_by(Movie.popularity.desc()).limit(50)
+        result = await db.execute(stmt)
+        movies = result.scalars().all()
+        
+        movies_context = "\n".join([
+            f"ID: {m.id}, Title: {m.title}, Genres: {', '.join(m.genres) if m.genres else 'Unknown'}, Overview: {m.overview[:150]}..."
+            for m in movies
+        ])
+
+        llm_response = await generate_cinebot_response(
+            conversation_history=request.history,
+            user_message=request.message,
+            available_movies_context=movies_context
+        )
+
+        if not llm_response:
+            raise HTTPException(status_code=500, detail="Failed to generate AI response")
+
+        final_recommendations = []
+        movie_dict = {str(m.id): m for m in movies}
+        
+        for rec in llm_response.recommendations:
+            db_movie = movie_dict.get(str(rec.id))
+            if db_movie:
+                final_recommendations.append(CineBotMovieResult(
+                    id=str(db_movie.id),
+                    title=db_movie.title,
+                    overview=db_movie.overview,
+                    poster_path=db_movie.poster_path,
+                    reasoning=rec.reasoning
+                ))
+            else:
+                final_recommendations.append(CineBotMovieResult(
+                    id=rec.id,
+                    title=rec.title,
+                    overview="Details not available in current context.",
+                    poster_path=None,
+                    reasoning=rec.reasoning
+                ))
+
+        return CineBotResponseModel(
+            conversational_reply=llm_response.conversational_reply,
+            recommendations=final_recommendations
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("cinebot_endpoint_failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error during AI assistant generation")
