@@ -6,7 +6,8 @@ from typing import List, Optional, Dict
 from pydantic import BaseModel
 import json
 import hashlib
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
+
 from sqlalchemy import or_, and_, cast, String, extract
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession

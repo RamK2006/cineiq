@@ -6,7 +6,7 @@ Uses structured output (JSON schema) to ensure consistent, parseable responses.
 import os
 import json
 import structlog
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 
 logger = structlog.get_logger()

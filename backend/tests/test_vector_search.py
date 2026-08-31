@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch
 
 from app.services.embeddings import BaseEmbedder, GeminiEmbedder, LocalSentenceTransformerEmbedder, get_embedder

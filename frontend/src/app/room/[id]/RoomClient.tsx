@@ -62,12 +62,13 @@ export default function RoomClient() {
   const wsRef = useRef<RoomWebSocket | null>(null);
 
   const triggerFloatingEmoji = useCallback((emoji: string) => {
-    const id = Date.now() + Math.random();
+    const id = String(Date.now() + Math.random());
     setReactions(prev => [...prev, { id, emoji, timestamp: Date.now() }]);
     setTimeout(() => {
       setReactions(prev => prev.filter(r => r.id !== id));
     }, 2000);
   }, []);
+
 
   const handleSendReaction = useCallback((emoji: string) => {
     if (wsRef.current) {
