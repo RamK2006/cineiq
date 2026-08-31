@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, Maximize, Volume2, Users, MoreVertical, Lock, Unlock, LogOut } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
+import VideoPlayer from '@/components/VideoPlayer';
+import { SubtitleTrackData } from '@/types/media';
 
 export default function RoomClient() {
   const params = useParams();
@@ -33,6 +35,12 @@ export default function RoomClient() {
   const [passcodeInput, setPasscodeInput] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
   const [kicked, setKicked] = useState(false);
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  
+  const availableTracks: SubtitleTrackData[] = [
+    { id: 'en', label: 'English', language: 'en', src: '/subtitles/en.srt', kind: 'subtitles', format: 'srt' },
+    { id: 'es', label: 'Spanish', language: 'es', src: '/subtitles/es.vtt', kind: 'subtitles', format: 'vtt' }
+  ];
   
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -119,6 +127,10 @@ export default function RoomClient() {
             if (message.payload?.action === 'play') setIsPlaying(true);
             else if (message.payload?.action === 'pause') setIsPlaying(false);
             if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
+            if (message.payload?.activeTrackId !== undefined) setActiveTrackId(message.payload.activeTrackId);
+            break;
+          case 'SUBTITLE_TRACK_CHANGED':
+            setActiveTrackId(message.payload?.trackId ?? null);
             break;
           case 'TRANSFER_HOST':
             setHostId(message.payload.host_id);
@@ -171,6 +183,16 @@ export default function RoomClient() {
       if (ws.current) ws.current.close();
     };
   }, [connectWebSocket]);
+
+  const handleTrackChange = (trackId: string | null) => {
+    setActiveTrackId(trackId);
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: 'SUBTITLE_TRACK_CHANGED',
+        payload: { trackId }
+      }));
+    }
+  };
 
   const emitSync = (action: 'play' | 'pause' | 'seek', newProgress?: number) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
@@ -298,44 +320,17 @@ export default function RoomClient() {
             </div>
         )}
 
-        <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: '#111827', color: 'var(--text-secondary)' }}>
-          No licensed playback source is configured for this room.
-        </div>
-        
-        {/* Play/Pause Overlay animation */}
-        {!isPlaying && !showPasscodeModal && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }}>
-            <motion.button 
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={handlePlayPause}
-              aria-label="Play video"
-              style={{ background: 'var(--accent-primary)', border: 'none', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 0 30px rgba(229,9,20,0.5)' }}
-            >
-              <Play size={40} fill="white" color="white" style={{ marginLeft: '6px' }} />
-            </motion.button>
-          </div>
+        {!showPasscodeModal && (
+          <VideoPlayer
+            isPlaying={isPlaying}
+            progress={progress}
+            onPlayPause={(playing) => { setIsPlaying(playing); emitSync(playing ? 'play' : 'pause'); }}
+            onSeek={(p) => { setProgress(p); emitSync('seek', p); }}
+            tracks={availableTracks}
+            activeTrackId={activeTrackId}
+            onTrackChange={handleTrackChange}
+          />
         )}
-
-        {/* Video Controls Bottom Bar */}
-        <div className="glass-panel room-video-controls" style={{ position: 'absolute', bottom: '20px', left: '20px', right: '320px', padding: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <button onClick={handlePlayPause} aria-label={isPlaying ? 'Pause video' : 'Play video'} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
-            {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
-          </button>
-          
-          <div onClick={handleSeek} style={{ flex: 1, height: '4px', background: 'rgba(255,255,255,0.2)', borderRadius: '2px', cursor: 'pointer' }}>
-            <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent-primary)', borderRadius: '2px', transition: 'width 0.1s' }} />
-          </div>
-
-          <span style={{ fontFamily: 'var(--font-body)', fontSize: '14px' }}>00:00 / 02:45:00</span>
-          
-          <button aria-label="Adjust volume" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
-            <Volume2 size={20} />
-          </button>
-          <button aria-label="Toggle fullscreen" style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}>
-            <Maximize size={20} />
-          </button>
-        </div>
       </div>
 
       {/* Right Sidebar: Chat & Participants */}
