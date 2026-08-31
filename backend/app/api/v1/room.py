@@ -244,6 +244,9 @@ async def room_websocket_signaling_endpoint(
             room_id, user_id, {"type": "peer-left", "peerId": user_id}
         )
 
+class WSMessage(BaseModel):
+    type: Literal["play", "pause", "seek", "chat", "submit_passcode", "TRANSFER_HOST", "KICK_USER", "MUTE_USER", "LOCK_ROOM", "UNLOCK_ROOM", "SUBTITLE_TRACK_CHANGED"]
+    type: Literal["play", "pause", "seek", "chat", "submit_passcode", "TRANSFER_HOST", "KICK_USER", "MUTE_USER", "LOCK_ROOM", "UNLOCK_ROOM"]
 
 class WSMessage(BaseModel):
     type: Literal[
@@ -576,6 +579,10 @@ async def websocket_endpoint(
                         "payload": {"text": text, "timestamp": chat_msg["timestamp"]},
                     }
                     await manager.broadcast(room_id, broadcast_msg, sender=websocket)
+                    
+                elif msg_type in ("play", "pause", "seek", "SUBTITLE_TRACK_CHANGED"):
+                    await manager.broadcast(room_id, validated_msg.model_dump(), sender=websocket)
+                    
 
                 elif msg_type == "reaction":
                     broadcast_msg = {
@@ -593,7 +600,16 @@ async def websocket_endpoint(
                     if redis:
                         try:
                             sync_data = payload if isinstance(payload, dict) else {}
-                            sync_data["action"] = msg_type
+                            if msg_type != "SUBTITLE_TRACK_CHANGED":
+                                sync_data["action"] = msg_type
+                            else:
+                                # Retrieve existing state to preserve play/pause action when changing subtitle
+                                state_str = redis.get(f"room:{room_id}:state")
+                                if state_str:
+                                    existing = json.loads(state_str)
+                                    sync_data["action"] = existing.get("action", "pause")
+                                    sync_data["progress"] = existing.get("progress", 0)
+                                sync_data["activeTrackId"] = payload.get("trackId")
                             sync_data["timestamp"] = time.time()
                             redis.set(f"room:{room_id}:state", json.dumps(sync_data))
                             redis.expire(f"room:{room_id}:state", 86400)
@@ -601,7 +617,13 @@ async def websocket_endpoint(
                             logger.error("redis_set_state_failed", error=str(e))
                     else:
                         sync_data = payload if isinstance(payload, dict) else {}
-                        sync_data["action"] = msg_type
+                        if msg_type != "SUBTITLE_TRACK_CHANGED":
+                            sync_data["action"] = msg_type
+                        else:
+                            existing = in_memory_state.get(room_id, {})
+                            sync_data["action"] = existing.get("action", "pause")
+                            sync_data["progress"] = existing.get("progress", 0)
+                            sync_data["activeTrackId"] = payload.get("trackId")
                         sync_data["timestamp"] = time.time()
                         in_memory_state[room_id] = sync_data
 

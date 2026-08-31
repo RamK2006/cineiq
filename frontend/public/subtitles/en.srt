@@ -1,0 +1,11 @@
+1
+00:00:01,000 --> 00:00:04,000
+Welcome to the Big Buck Bunny movie.
+
+2
+00:00:05,000 --> 00:00:09,000
+This is an English subtitle track (SRT format).
+
+3
+00:00:10,000 --> 00:00:15,000
+The subtitles are synchronized across the room!
