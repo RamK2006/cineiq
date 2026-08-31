@@ -173,6 +173,7 @@ async def room_websocket_signaling_endpoint(
         })
 
 class WSMessage(BaseModel):
+    type: Literal["play", "pause", "seek", "chat", "submit_passcode", "TRANSFER_HOST", "KICK_USER", "MUTE_USER", "LOCK_ROOM", "UNLOCK_ROOM", "SUBTITLE_TRACK_CHANGED", "reaction"]
     type: Literal["play", "pause", "seek", "chat", "submit_passcode", "TRANSFER_HOST", "KICK_USER", "MUTE_USER", "LOCK_ROOM", "UNLOCK_ROOM"]
 
     payload: Optional[Any] = None
@@ -454,7 +455,15 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, token: str = Qu
                     }
                     await manager.broadcast(room_id, broadcast_msg, sender=websocket)
                     
-                elif msg_type in ("play", "pause", "seek"):
+                elif msg_type == "reaction":
+                    broadcast_msg = {
+                        "type": "reaction",
+                        "user": user_id,
+                        "payload": payload
+                    }
+                    await manager.broadcast(room_id, broadcast_msg, sender=websocket)
+                    
+                elif msg_type in ("play", "pause", "seek", "SUBTITLE_TRACK_CHANGED"):
                     await manager.broadcast(room_id, validated_msg.model_dump(), sender=websocket)
                     
                     if redis:
