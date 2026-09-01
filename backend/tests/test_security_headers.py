@@ -1,6 +1,5 @@
 from fastapi.testclient import TestClient
 from unittest.mock import patch
-import pytest
 
 from app.main import app
 from app.core.security import CSP_DIRECTIVES, ALLOWED_ORIGINS

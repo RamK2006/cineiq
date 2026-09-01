@@ -86,29 +86,21 @@ export default function ProfileClient() {
       .toUpperCase() || 'U';
   }, [user?.fullName, userEmail]);
 
+  const genrePreferences = stats.genre_preferences ?? [];
+  const hasTasteProfile = genrePreferences.length > 0 || (Boolean(stats.radarData) && (stats.radarData?.length ?? 0) > 0);
+
   if (!isLoaded || !isSignedIn) {
     return (
       <main aria-busy="true" style={{ minHeight: '100vh', padding: '140px 5% 40px' }}>
         <div className="glass-panel" style={{ maxWidth: '520px', margin: '0 auto', padding: '40px' }}>
           <div style={{ height: '24px', width: '55%', background: 'rgba(255,255,255,.08)', borderRadius: '8px' }} />
         </div>
-  
-      <ShareCardModal 
-        isOpen={isShareModalOpen} 
-        onClose={() => setIsShareModalOpen(false)} 
-        userName={userName} 
-        userAvatar={user?.imageUrl || ''} 
-        moviesWatched={stats.movies_watched} 
-        radarData={stats.radarData || []} 
-        primaryGenre={genrePreferences[0]?.genre || 'Movies'}
-      />
-    
-    </main>
+      </main>
     );
   }
 
-  const genrePreferences = stats.genre_preferences ?? [];
-  const hasTasteProfile = genrePreferences.length > 0 || (Boolean(stats.radarData) && (stats.radarData?.length ?? 0) > 0);
+
+
 
 
   return (

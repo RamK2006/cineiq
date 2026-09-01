@@ -2,7 +2,7 @@ import html
 import json
 import time
 import uuid
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import Any, Dict, List, Literal, Optional
 
 import bcrypt
 import structlog
@@ -40,6 +40,8 @@ MessageType = Literal[
 class WSMessage(BaseModel):
     type: MessageType
     payload: Optional[Any] = None
+
+
 
 
 class CreateRoomRequest(BaseModel):

@@ -4,8 +4,6 @@ from typing import Callable, Awaitable
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 import structlog
-import time
-import json
 from app.db.session import get_redis
 
 logger = structlog.get_logger(__name__)

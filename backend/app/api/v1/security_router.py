@@ -2,7 +2,6 @@ from fastapi import APIRouter, Request, Depends, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 from pydantic import BaseModel
-from typing import Optional, Any
 from app.db.session import get_db
 from app.db.models import CSPViolationReport
 import json

@@ -25,7 +25,7 @@ def test_waf_allows_clean_request(mock_redis):
 
 def test_waf_blocks_sqli_in_url(mock_redis):
     # URL encoded SQL injection
-    response = client.get("/api/v1/recommend/trending?q=1%27%20UNION%20SELECT%20null--")
+    client.get("/api/v1/recommend/trending?q=1%27%20UNION%20SELECT%20null--")
     # Actually, WAF middleware might trigger, let's mock it fully blocking
     # We set incrby to return 100 which triggers block
     mock_redis.incrby.return_value = 100
@@ -34,7 +34,7 @@ def test_waf_blocks_sqli_in_url(mock_redis):
     # We injected mock_redis via fixture.
     # WAF detects UNION SELECT and increments threat score.
     # If the score >= 100, it blocks immediately.
-    response2 = client.get("/api/v1/recommend/trending?q=1%27%20UNION%20SELECT%20null--")
+    client.get("/api/v1/recommend/trending?q=1%27%20UNION%20SELECT%20null--")
     
     # Check if WAF blocked it
     # Note: Our WAF blocks if `is_ip_blocked` returns True or `add_threat_score` reaches threshold and we block.
@@ -50,10 +50,11 @@ def test_waf_blocks_xss_in_body(mock_redis):
     # POST triggers CSRF, we need to bypass CSRF or provide token
     token = CSRFTokenEngine.generate_token()
     
-    response = client.post("/api/v1/security/csp-report", json=payload, headers={"X-CSRF-Token": token})
+    client.post("/api/v1/security/csp-report", json=payload, headers={"X-CSRF-Token": token})
     # csp-report is exempted from CSRF, but WAF still checks it
     # XSS payload found.
     assert mock_redis.incrby.called
+
 
 def test_csrf_generates_cookie():
     response = client.get("/health")

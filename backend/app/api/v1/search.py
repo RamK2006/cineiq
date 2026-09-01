@@ -3,6 +3,7 @@ import httpx
 import structlog
 from datetime import datetime
 from typing import List, Literal, Optional
+
 from pydantic import BaseModel
 import json
 import hashlib
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from sqlalchemy import and_, case, cast, or_, String
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 
 from app.core.config import settings
 from app.db.session import get_redis, get_db

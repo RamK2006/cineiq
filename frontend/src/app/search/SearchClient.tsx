@@ -25,7 +25,7 @@ function SearchContent() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Result[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  
+
   // Suggestions state
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -237,6 +237,7 @@ function SearchContent() {
               />
               <button
                 type="button"
+
                 onClick={() => setShowFilters(!showFilters)}
                 className={`btn ${showFilters ? 'btn-primary' : 'btn-glass'}`}
                 style={{ padding: '8px 12px' }}
@@ -344,6 +345,7 @@ function SearchContent() {
               </div>
             )}
           </div>
+
 
           {showFilters && (
             <div className="glass-panel" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>

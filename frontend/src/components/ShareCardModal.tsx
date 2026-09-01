@@ -41,9 +41,10 @@ export default function ShareCardModal({
   const [safeAvatar, setSafeAvatar] = useState<string>('');
 
   useEffect(() => {
-    if (typeof navigator !== 'undefined' && navigator.share) {
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       setIsNativeShareSupported(true);
     }
+
     
     const fetchSafeAvatar = async () => {
         if (!userAvatar) return;

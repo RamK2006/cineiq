@@ -1,4 +1,3 @@
-import pytest
 from app.services.ml_engine.matrix_factorization import ImplicitFeedbackMF
 from app.services.ml_engine.nlp_sentiment import SimpleTFIDFAnalyzer
 from app.services.ml_engine.taste_profile import TasteAnalyticsEngine

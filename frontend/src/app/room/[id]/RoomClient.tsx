@@ -51,7 +51,10 @@ export default function RoomClient() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isChatVisible, setChatVisible] = useState(true);
 
+  const roomVideoAreaRef = useRef<HTMLDivElement>(null);
+
   // WebRTC & Voice State
+
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [peerStreams, setPeerStreams] = useState<Map<string, MediaStream>>(new Map());
   const [cameraActive, setCameraActive] = useState(true);
@@ -61,16 +64,17 @@ export default function RoomClient() {
 
   // Refs
   const wsRef = useRef<RoomWebSocket | null>(null);
-  const roomVideoAreaRef = useRef<HTMLDivElement>(null);
+
 
   // Reaction Handling
   const triggerFloatingEmoji = useCallback((emoji: string) => {
-    const id = Date.now() + Math.random();
+    const id = String(Date.now() + Math.random());
     setReactions(prev => [...prev, { id, emoji, timestamp: Date.now() }]);
     setTimeout(() => {
       setReactions(prev => prev.filter(r => r.id !== id));
     }, 2000);
   }, []);
+
 
   const handleSendReaction = useCallback((emoji: string) => {
     if (wsRef.current) {
@@ -197,7 +201,10 @@ export default function RoomClient() {
     };
   }, [connectWebSocket]);
 
+
+
   // Video Controls
+
   const handlePlayPause = useCallback(() => {
     const nextState = !isPlaying;
     setIsPlaying(nextState);
@@ -339,6 +346,7 @@ export default function RoomClient() {
       </AnimatePresence>
 
       {/* Main Video Section */}
+
       <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-black">
         {/* Status Indicators */}
         {!isFullscreen && (

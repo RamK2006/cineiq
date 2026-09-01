@@ -1,6 +1,5 @@
 import math
 from typing import List, Dict, Any, Tuple
-from collections import Counter
 import structlog
 
 from app.services.ml_engine.matrix_factorization import ImplicitFeedbackMF
@@ -99,7 +98,9 @@ class TasteAnalyticsEngine:
             
         sorted_genres = sorted(filtered_genres.items(), key=lambda x: x[1], reverse=True)[:6]
         max_score = sorted_genres[0][1] if sorted_genres else 1.0
-        if max_score == 0: max_score = 1.0
+        if max_score == 0:
+            max_score = 1.0
+
         
         radar_data = []
         genre_prefs = []
