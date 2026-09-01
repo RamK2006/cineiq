@@ -40,7 +40,7 @@ CSP_DIRECTIVES: str = (
     "connect-src 'self' https://cineiq.com; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
-    "form-action 'self';"
+    "form-action 'self'; report-uri /api/v1/security/csp-report;"
 )
 
 security = HTTPBearer(auto_error=False)
