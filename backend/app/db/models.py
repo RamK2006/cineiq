@@ -1,20 +1,30 @@
+"""
+backend/app/db/models.py
+------------------------
+Refactored SQLAlchemy database models for [CineIQ](https://github.com/RamK2006/cineiq), incorporating updated WatchRoom schema support for public rooms, titles, participant limits, and tags (#209).
+"""
+
+from __future__ import annotations
+
+import datetime
+from datetime import datetime, timezone
+import uuid
+
 from sqlalchemy import (
-    Column,
-    String,
-    Float,
-    Integer,
     Boolean,
-    DateTime,
-    ForeignKey,
-    Text,
-    JSON,
     CheckConstraint,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
     UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import declarative_base, relationship
-import uuid
-from datetime import datetime, timezone
 
 Base = declarative_base()
 
@@ -29,8 +39,12 @@ class User(Base):
     id = Column(String, primary_key=True, index=True)  # Clerk ID
     email = Column(String, unique=True, index=True, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
     interactions = relationship("Interaction", back_populates="user")
     watch_rooms = relationship("WatchRoom", back_populates="creator")
     reviews = relationship("Review", back_populates="user", cascade="all, delete-orphan")
@@ -45,18 +59,20 @@ class Movie(Base):
     release_date = Column(DateTime(timezone=True), nullable=True)
     poster_path = Column(String, nullable=True)
     backdrop_path = Column(String, nullable=True)
-    # Stored as JSON list of strings — portable across SQLite, PostgreSQL, etc.
     genres = Column(JSON, default=list)
     popularity = Column(Float, default=0.0)
     vote_average = Column(Float, default=0.0)
     vote_count = Column(Integer, default=0)
 
-    # Emotional and semantic metadata
     dominant_emotion = Column(String, nullable=True)
     emotional_arc = Column(JSON, nullable=True)
-    
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
     interactions = relationship("Interaction", back_populates="movie")
     reviews = relationship("Review", back_populates="movie", cascade="all, delete-orphan")
     movie_actions = relationship("UserMovieAction", back_populates="movie", cascade="all, delete-orphan")
@@ -67,11 +83,15 @@ class Interaction(Base):
     id = Column(String, primary_key=True, default=_generate_uuid)
     user_id = Column(String, ForeignKey("users.id"), index=True)
     movie_id = Column(String, ForeignKey("movies.id"), index=True)
-    interaction_type = Column(String) # 'view', 'like', 'dislike', 'watchlist'
-    rating = Column(Float, nullable=True) # Explicit rating if any
+    interaction_type = Column(String)  # 'view', 'like', 'dislike', 'watchlist'
+    rating = Column(Float, nullable=True)
     timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
     user = relationship("User", back_populates="interactions")
     movie = relationship("Movie", back_populates="interactions")
 
@@ -114,12 +134,22 @@ class WatchRoom(Base):
     id = Column(String, primary_key=True, default=_generate_uuid)
     creator_id = Column(String, ForeignKey("users.id"))
     movie_id = Column(String, ForeignKey("movies.id"), nullable=True)
+    
+    # Updated fields for public room discovery and limits (#209)
+    title = Column(String, nullable=False, default="Watch Party")
+    is_public = Column(Boolean, default=True, nullable=False)
+    max_participants = Column(Integer, default=10, nullable=False)
+    tags = Column(JSON, default=list, nullable=False)
+    
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
-    creator = relationship("User", back_populates="watch_rooms")
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
+    creator = relationship("User", back_populates="watch_rooms")
 
 
 class Review(Base):

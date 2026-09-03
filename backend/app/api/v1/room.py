@@ -236,13 +236,9 @@ manager = RoomManager()
 # REST Endpoints
 # ------------------------------------------------------------------------------
 @router.post("/create")
-async def create_room(
-    req: Optional[CreateRoomRequest] = None,
-    current_user: str = Depends(get_current_user),
-):
-    """Create a new Watch-Together room."""
+async def create_room(req: Optional[CreateRoomRequest] = None, current_user: str = Depends(get_current_user)):
     room_id = str(uuid.uuid4())
-    passcode_hash = hash_passcode(req.passcode) if req and req.passcode else None
+    passcode_hash = bcrypt.hashpw(req.passcode.encode("utf-8"), bcrypt.gensalt()).decode("utf-8") if req and req.passcode else None
 
     meta = {
         "host_id": current_user,
@@ -337,14 +333,12 @@ async def websocket_endpoint(
         return
 
     try:
-        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-        payload = await verify_token(credentials)
+        payload = await verify_token(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token))
         user_id = payload.get("sub")
         if not user_id:
             await websocket.close(code=1008, reason="User ID missing from token")
             return
-    except Exception as e:
-        logger.warning("ws_auth_failed", error=str(e))
+    except Exception:
         await websocket.close(code=1008, reason="Authentication failed")
         return
 
@@ -358,17 +352,16 @@ async def websocket_endpoint(
         }
         set_room_meta(room_id, meta)
 
-    accepted = await manager.connect(room_id, websocket, user_id)
-    if not accepted:
+    if not await manager.connect(room_id, websocket, user_id):
         return
 
     is_host = meta["host_id"] == user_id
 
     # Handle passcode gatekeeping for locked rooms
     if meta["is_locked"] and not is_host:
-        await manager.send_personal_message({"type": "PASSCODE_REQUIRED"}, websocket)
-        verified = False
+        await manager.send_personal({"type": "PASSCODE_REQUIRED"}, websocket)
         try:
+            verified = False
             while not verified:
                 data = await websocket.receive_text()
                 message_dict = json.loads(data)
@@ -378,13 +371,9 @@ async def websocket_endpoint(
                         passcode, meta["passcode_hash"]
                     ):
                         verified = True
-                        await manager.send_personal_message(
-                            {"type": "PASSCODE_ACCEPTED"}, websocket
-                        )
+                        await manager.send_personal({"type": "PASSCODE_ACCEPTED"}, websocket)
                     else:
-                        await manager.send_personal_message(
-                            {"type": "PASSCODE_REJECTED"}, websocket
-                        )
+                        await manager.send_personal({"type": "PASSCODE_REJECTED"}, websocket)
                 else:
                     await manager.send_personal_message(
                         {"error": "Passcode required to join"}, websocket
@@ -425,10 +414,8 @@ async def websocket_endpoint(
             current_server_time = time.time()
 
             try:
-                message_dict = json.loads(data)
-                validated_msg = WSMessage(**message_dict)
-                msg_type = validated_msg.type
-                payload = validated_msg.payload or {}
+                msg = WSMessage(**json.loads(data))
+                msg_type, payload = msg.type, msg.payload or {}
 
                 # NTP Clock Calibration
                 if msg_type == "PING":
@@ -517,9 +504,7 @@ async def websocket_endpoint(
                 ):
                     current_meta = get_room_meta(room_id)
                     if not current_meta or current_meta["host_id"] != user_id:
-                        await manager.send_personal_message(
-                            {"error": "Only host can perform this action"}, websocket
-                        )
+                        await manager.send_personal({"error": "Only host can perform actions"}, websocket)
                         continue
 
                     if msg_type == "TRANSFER_HOST":
