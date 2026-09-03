@@ -1,7 +1,7 @@
 
 from app.services.ml_engine.taste_profile import TasteAnalyticsEngine
-from app.db.models import Review
 import math
+
 from collections import Counter
 from typing import List, Dict, Any
 

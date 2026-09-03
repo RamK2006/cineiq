@@ -1,29 +1,42 @@
+"""
+backend/app/main.py
+-------------------
+Main entry point for the CINEIQ API application, incorporating FastAPI setup,
+lifespan management, middleware configurations, error handlers, and health endpoints.
+"""
+
+from __future__ import annotations
+
+import datetime
 from contextlib import asynccontextmanager
 import time
 import uuid
 
-import structlog
-
 from fastapi import FastAPI, Request, Response
-import httpx
 from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import datetime
+import httpx
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy import event
+import structlog
 import structlog.contextvars
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1 import api_router
 from app.api.v1.room import room_websocket_signaling_endpoint
 from app.core.config import settings
-from app.core.security import ALLOWED_ORIGINS, CSP_DIRECTIVES, ENV
-
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi.errors import RateLimitExceeded
-from app.core.rate_limit import limiter
-from app.db.models import Base
-from app.db.session import engine, AsyncSessionLocal
 from app.core.logging import log_exception
+from app.core.metrics import (
+    db_query_duration_seconds,
+    http_request_duration_seconds,
+    http_requests_total,
+)
+from app.core.rate_limit import limiter
+from app.core.security import ALLOWED_ORIGINS, CSP_DIRECTIVES, ENV
+from app.db.models import Base
+from app.db.session import AsyncSessionLocal, engine
 from app.services.sync import seed_movies_if_empty
 
 try:
@@ -31,17 +44,9 @@ try:
 except ImportError:
     Instrumentator = None
 
-from app.core.metrics import (
-    db_query_duration_seconds,
-    http_requests_total,
-    http_request_duration_seconds,
-    websocket_connected_clients,
-)
-from sqlalchemy import event
-
 HEALTH_ERROR_PREFIX = "error:"
 
-logger = structlog.get_logger()
+logger = structlog.get_logger(__name__)
 
 
 def get_request_id(request: Request) -> str:
@@ -50,16 +55,25 @@ def get_request_id(request: Request) -> str:
 
 
 def get_http_client(request: Request) -> httpx.AsyncClient:
+    """Return the shared HTTP client from application state."""
     return request.app.state.http_client
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    app.state.http_client = httpx.AsyncClient(timeout=10.0)
-    logger.info(
-        "cineiq_starting", host=settings.backend_host, port=settings.backend_port
-    )
+    """Manage application startup and shutdown lifecycle events."""
+    # Startup Initialization
+    logger.info("cineiq_starting", host=settings.backend_host, port=settings.backend_port)
+    
+    # Initialize shared HTTP client
+    try:
+        app.state.http_client = httpx.AsyncClient(timeout=10.0)
+        logger.info("shared_httpx_client_created", timeout_seconds=10.0)
+    except Exception as e:
+        logger.error("httpx_client_creation_failed", error=str(e))
+        app.state.http_client = None
+
+    # Initialize Database & Seeding
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -76,11 +90,10 @@ async def lifespan(app: FastAPI):
             message="Protected endpoints will return 503 until Clerk is configured.",
         )
 
-    # --- Configure Google Gemini ONCE at startup (not per request) ---
+    # Configure Google Gemini
     if settings.gemini_api_key:
         try:
             import google.generativeai as genai
-
             genai.configure(api_key=settings.gemini_api_key)
             logger.info("gemini_configured", model=settings.gemini_model)
         except Exception as e:
@@ -91,35 +104,24 @@ async def lifespan(app: FastAPI):
             message="GEMINI_API_KEY is not set; keyword extraction will be skipped.",
         )
 
-    # Create a shared httpx.AsyncClient for reuse across requests
-    try:
-        app.state.http_client = httpx.AsyncClient(timeout=10.0)
-        logger.info("shared_httpx_client_created", timeout_seconds=10)
-    except Exception as e:
-        logger.error("httpx_client_creation_failed", error=str(e))
-        app.state.http_client = None
-
-    # Load the TMDB movie genre map once so recommendation responses can
-    # resolve genre IDs without making an extra request for every movie.
+    # Initialize TMDB Genre map
     try:
         from app.api.v1.recommend import initialize_tmdb_genres
-
-        await initialize_tmdb_genres(app.state.http_client)
+        if app.state.http_client:
+            await initialize_tmdb_genres(app.state.http_client)
     except Exception as e:
         logger.error("tmdb_genre_initialization_failed", error=str(e))
 
     yield
-    # Shutdown
-    if hasattr(app.state, "http_client"):
-        await app.state.http_client.aclose()
+
+    # Shutdown Cleanup
     logger.info("cineiq_stopped")
-    # Close shared httpx client if created
-    try:
-        if getattr(app.state, "http_client", None) is not None:
+    if getattr(app.state, "http_client", None) is not None:
+        try:
             await app.state.http_client.aclose()
             logger.info("shared_httpx_client_closed")
-    except Exception as e:
-        logger.error("httpx_client_close_failed", error=str(e))
+        except Exception as e:
+            logger.error("httpx_client_close_failed", error=str(e))
 
     await engine.dispose()
 
@@ -131,17 +133,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Rate limiting — the SlowAPI middleware may not be compatible with all
-# FastAPI versions.  Wrap registration so the app still starts if it fails.
+# Configure Rate Limiting Middleware
 try:
     app.state.limiter = limiter
     app.add_middleware(SlowAPIMiddleware)
-except Exception as _rl_err:
-    import logging as _log
+except Exception as rl_err:
+    logger.warning("slowapi_middleware_disabled", error=str(rl_err))
 
-    _log.getLogger("uvicorn").warning(f"SlowAPI middleware disabled: {_rl_err}")
-
-# 1. Enforce strict CORS whitelist validation
+# Enforce strict CORS whitelist validation
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -151,16 +150,14 @@ app.add_middleware(
 )
 
 
-# 2. Custom Security Headers Middleware for OWASP Compliance
+# Custom Security Headers Middleware for OWASP Compliance
 @app.middleware("http")
 async def add_security_headers_middleware(request: Request, call_next):
-    # Handle preflight requests cleanly
     if request.method == "OPTIONS":
         return await call_next(request)
 
     response: Response = await call_next(request)
 
-    # Apply OWASP strict security compliance response headers
     response.headers["Content-Security-Policy"] = CSP_DIRECTIVES
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -175,14 +172,13 @@ async def add_security_headers_middleware(request: Request, call_next):
     return response
 
 
-# 3. Metrics Collection Middleware
+# Metrics Collection Middleware
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     duration = time.time() - start_time
 
-    # Record HTTP request metrics
     http_requests_total.labels(
         method=request.method, path=request.url.path, status=response.status_code
     ).inc()
@@ -196,7 +192,6 @@ async def metrics_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    # Generate a unique correlation ID for every incoming request.
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
     structlog.contextvars.bind_contextvars(request_id=request_id)
@@ -214,7 +209,6 @@ async def log_requests(request: Request, call_next):
         request_id=request_id,
     )
 
-    # Expose the correlation ID to clients for support/debugging.
     response.headers["X-Request-ID"] = request_id
     structlog.contextvars.clear_contextvars()
     return response
@@ -262,16 +256,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     request_id = get_request_id(request)
-    log_exception(
-        logger,
-        exc,
-        event="unhandled_exception",
-        request=request,
-    )
-    if settings.environment.lower() in ("production", "prod"):
-        detail = "Internal server error"
-    else:
-        detail = f"{type(exc).__name__}: {exc}"
+    log_exception(logger, exc, event="unhandled_exception", request=request)
+    
+    detail = "Internal server error" if ENV in ("production", "prod") else f"{type(exc).__name__}: {exc}"
     return JSONResponse(
         status_code=500,
         content={
@@ -283,15 +270,12 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 try:
-
     @app.exception_handler(RateLimitExceeded)
     async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
         request_id = get_request_id(request)
         retry_after = "60"
         if hasattr(exc, "retry_after") and exc.retry_after is not None:
             retry_after = str(int(exc.retry_after))
-        elif hasattr(exc, "limit") and exc.limit is not None:
-            retry_after = "60"
 
         return JSONResponse(
             status_code=429,
@@ -302,10 +286,10 @@ try:
             },
             headers={"Retry-After": retry_after},
         )
-
 except Exception:
     pass
 
+# Include Routers & WebSockets
 app.include_router(api_router, prefix="/api/v1")
 
 
@@ -319,7 +303,7 @@ async def instrumented_websocket_endpoint(websocket, room_id: str, user_id: str)
         websocket_connected_clients.dec()
 
 
-# Instrument database queries via SQLAlchemy events on the sync engine
+# Database query event instrumentation
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
 def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
     context._query_start_time = time.time()
@@ -332,7 +316,7 @@ def after_cursor_execute(conn, cursor, statement, parameters, context, executema
         db_query_duration_seconds.observe(duration)
 
 
-# Instrument the FastAPI app with Prometheus metrics
+# Prometheus instrumentator setup
 if Instrumentator:
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
@@ -349,7 +333,6 @@ async def health_check():
     # Check Redis
     try:
         from app.db.session import get_redis
-
         redis = get_redis()
         if redis:
             redis.ping()
@@ -363,13 +346,12 @@ async def health_check():
     try:
         from app.db.session import engine
         from sqlalchemy import text
-
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         postgres_status = "ok"
     except Exception as e:
         postgres_status = f"{HEALTH_ERROR_PREFIX}{str(e)[:100]}"
-    # Check Gemini API
+
     gemini_status = "configured" if settings.gemini_api_key else "not_configured"
 
     checks = {

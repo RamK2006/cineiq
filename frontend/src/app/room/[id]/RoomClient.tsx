@@ -2,17 +2,22 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, Maximize, Volume2, Users, Lock, Unlock, LogOut, MessageSquare, X } from 'lucide-react';
+import { Play, Pause, Maximize, Volume2, Lock, Unlock, LogOut, MessageSquare } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
 import VideoPlayer from '@/components/VideoPlayer';
 import CinemaOverlay, { Reaction } from '@/components/CinemaOverlay';
-import { SubtitleTrackData } from '@/types/media';
 import VoiceMeshOverlay from '@/components/VoiceMeshOverlay';
+import ChatSidebar from '@/components/chat/ChatSidebar';
 import { usePushToTalk } from '@/hooks/usePushToTalk';
 import { VoiceStatus } from '@/hooks/useAudioAnalyzer';
-import ChatSidebar from '@/components/chat/ChatSidebar';
-import { RoomWebSocket, WSMessage } from '@/lib/websocket';
+import { RoomWebSocket } from '@/lib/websocket';
+import { SubtitleTrackData } from '@/types/media';
+
+const AVAILABLE_TRACKS: SubtitleTrackData[] = [
+  { id: 'en', label: 'English', language: 'en', src: '/subtitles/en.srt', kind: 'subtitles', format: 'srt' },
+  { id: 'es', label: 'Spanish', language: 'es', src: '/subtitles/es.vtt', kind: 'subtitles', format: 'vtt' }
+];
 
 export default function RoomClient() {
   const params = useParams();
@@ -25,6 +30,7 @@ export default function RoomClient() {
   const userName = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress ?? 'You';
   const userAvatar = user?.imageUrl || '';
 
+  // Media & Room State
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [messages, setMessages] = useState<{ user: string; userId?: string; text: string; timestamp: string }[]>([]);
@@ -33,7 +39,7 @@ export default function RoomClient() {
   const [reactions, setReactions] = useState<Reaction[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
 
-  // Moderation state
+  // Moderation & Layout State
   const [hostId, setHostId] = useState<string | null>(null);
   const [mutedUsers, setMutedUsers] = useState<string[]>([]);
   const [isLocked, setIsLocked] = useState(false);
@@ -42,25 +48,13 @@ export default function RoomClient() {
   const [passcodeError, setPasscodeError] = useState('');
   const [kicked, setKicked] = useState(false);
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
-  
-  const availableTracks: SubtitleTrackData[] = [
-    { id: 'en', label: 'English', language: 'en', src: '/subtitles/en.srt', kind: 'subtitles', format: 'srt' },
-    { id: 'es', label: 'Spanish', language: 'es', src: '/subtitles/es.vtt', kind: 'subtitles', format: 'vtt' }
-  ];
-  
-  const ws = useRef<WebSocket | null>(null);
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
-  const expectedDisconnect = useRef<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isChatVisible, setChatVisible] = useState(true);
 
   const roomVideoAreaRef = useRef<HTMLDivElement>(null);
-  const availableTracks: SubtitleTrackData[] = [
-    { id: 'en', label: 'English', language: 'en', src: '/subtitles/en.srt', kind: 'subtitles', format: 'srt' },
-    { id: 'es', label: 'Spanish', language: 'es', src: '/subtitles/es.vtt', kind: 'subtitles', format: 'vtt' }
-  ];
 
-  // WebRTC Voice Mesh state
+  // WebRTC & Voice State
+
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [peerStreams, setPeerStreams] = useState<Map<string, MediaStream>>(new Map());
   const [cameraActive, setCameraActive] = useState(true);
@@ -68,15 +62,19 @@ export default function RoomClient() {
   const [voiceStates, setVoiceStates] = useState<Record<string, VoiceStatus>>({});
   const { isPttActive, shortcutKey, changeShortcut } = usePushToTalk('v');
 
+  // Refs
   const wsRef = useRef<RoomWebSocket | null>(null);
 
+
+  // Reaction Handling
   const triggerFloatingEmoji = useCallback((emoji: string) => {
-    const id = Date.now() + Math.random();
+    const id = String(Date.now() + Math.random());
     setReactions(prev => [...prev, { id, emoji, timestamp: Date.now() }]);
     setTimeout(() => {
       setReactions(prev => prev.filter(r => r.id !== id));
     }, 2000);
   }, []);
+
 
   const handleSendReaction = useCallback((emoji: string) => {
     if (wsRef.current) {
@@ -85,6 +83,14 @@ export default function RoomClient() {
     triggerFloatingEmoji(emoji);
   }, [triggerFloatingEmoji]);
 
+  // Sync Emitter Helper
+  const emitSync = useCallback((action: 'play' | 'pause' | 'seek', newProgress?: number) => {
+    if (wsRef.current) {
+      wsRef.current.send(action, { progress: newProgress !== undefined ? newProgress : progress });
+    }
+  }, [progress]);
+
+  // Connection Handler
   const connectWebSocket = useCallback(async () => {
     if (kicked) return;
     const token = await getToken();
@@ -111,15 +117,22 @@ export default function RoomClient() {
     ws.on('USER_JOINED', (data) => {
       if (data?.userId) {
         setMembers(prev => [...prev.filter(m => m.userId !== data.userId), data]);
-        setMessages(prev => [...prev, { user: 'System', text: `${data.username} joined the room`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+        setMessages(prev => [...prev, {
+          user: 'System',
+          text: `${data.username || 'A user'} joined the room`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
       }
     });
 
     ws.on('USER_LEFT', (data) => {
       if (data?.userId) {
         setMembers(prev => prev.filter(m => m.userId !== data.userId));
-        // Find username for system message if possible, otherwise generic
-        setMessages(prev => [...prev, { user: 'System', text: `A participant left the room`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+        setMessages(prev => [...prev, {
+          user: 'System',
+          text: 'A participant left the room',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
       }
     });
 
@@ -139,15 +152,20 @@ export default function RoomClient() {
     });
 
     ws.on('room_state', (payload) => {
-      setHostId(payload.host_id);
-      setIsLocked(payload.is_locked);
-      setMutedUsers(payload.muted_users || []);
+      if (payload?.host_id) setHostId(payload.host_id);
+      if (payload?.is_locked !== undefined) setIsLocked(payload.is_locked);
+      if (payload?.muted_users) setMutedUsers(payload.muted_users);
     });
 
     ws.on('sync', (payload) => {
       if (payload?.action === 'play') setIsPlaying(true);
       else if (payload?.action === 'pause') setIsPlaying(false);
       if (payload?.progress !== undefined) setProgress(payload.progress);
+      if (payload?.activeTrackId !== undefined) setActiveTrackId(payload.activeTrackId);
+    });
+
+    ws.on('SUBTITLE_TRACK_CHANGED', (payload) => {
+      setActiveTrackId(payload?.trackId ?? null);
     });
 
     ws.on('USER_KICKED', () => {
@@ -164,108 +182,12 @@ export default function RoomClient() {
       if (data?.user) setMutedUsers(prev => prev.filter(u => u !== data.user));
     });
 
-    ws.current.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.error && showPasscodeModal) {
-            setPasscodeError(message.error);
-            return;
-        }
-        
-        switch (message.type) {
-          case 'PASSCODE_REQUIRED':
-            setShowPasscodeModal(true);
-            setPasscodeError('');
-            break;
-          case 'PASSCODE_REJECTED':
-            setPasscodeError('Incorrect passcode');
-            break;
-          case 'PASSCODE_ACCEPTED':
-            setShowPasscodeModal(false);
-            setPasscodeError('');
-            break;
-          case 'room_state':
-            setHostId(message.payload.host_id);
-            setParticipants(message.payload.participants);
-            setIsLocked(message.payload.is_locked);
-            setMutedUsers(message.payload.muted_users || []);
-            break;
-          case 'play':
-            setIsPlaying(true);
-            if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
-            break;
-          case 'pause':
-            setIsPlaying(false);
-            if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
-            break;
-          case 'seek':
-            if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
-            break;
-          case 'history':
-            const historyMessages = message.payload || [];
-            setMessages(historyMessages.map((msg: any) => ({
-              user: msg.user || 'Unknown',
-              text: msg.text || ''
-            })));
-            break;
-          case 'chat':
-            setMessages(prev => [...prev, { user: message.user || 'Unknown', text: message.payload?.text || '' }]);
-            break;
-          case 'user_joined':
-            setParticipants(prev => {
-               if (!prev.includes(message.user)) return [...prev, message.user];
-               return prev;
-            });
-            setMessages(prev => [...prev, { user: 'System', text: `${message.user} joined the room` }]);
-            break;
-          case 'user_left':
-            setParticipants(prev => prev.filter(p => p !== message.user));
-            setMessages(prev => [...prev, { user: 'System', text: `${message.user} left the room` }]);
-            break;
-          case 'sync':
-            if (message.payload?.action === 'play') setIsPlaying(true);
-            else if (message.payload?.action === 'pause') setIsPlaying(false);
-            if (message.payload?.progress !== undefined) setProgress(message.payload.progress);
-            if (message.payload?.activeTrackId !== undefined) setActiveTrackId(message.payload.activeTrackId);
-            break;
-          case 'SUBTITLE_TRACK_CHANGED':
-            setActiveTrackId(message.payload?.trackId ?? null);
-            break;
-          case 'TRANSFER_HOST':
-            setHostId(message.payload.host_id);
-            break;
-          case 'USER_KICKED':
-            setKicked(true);
-            expectedDisconnect.current = true;
-            if (ws.current) ws.current.close();
-            setTimeout(() => {
-                router.push('/');
-            }, 3000);
-            break;
-          case 'USER_MUTED':
-            setMutedUsers(prev => prev.includes(message.user) ? prev : [...prev, message.user]);
-            break;
-          case 'USER_UNMUTED':
-            setMutedUsers(prev => prev.filter(u => u !== message.user));
-            break;
-          case 'ROOM_LOCKED':
-            setIsLocked(true);
-            break;
-          case 'ROOM_UNLOCKED':
-            setIsLocked(false);
-            break;
-        }
-      } catch (err) {
-        console.error('Failed to parse WS message', err);
-      }
-    };
     ws.on('ROOM_LOCKED', () => setIsLocked(true));
     ws.on('ROOM_UNLOCKED', () => setIsLocked(false));
     ws.on('PASSCODE_REQUIRED', () => { setShowPasscodeModal(true); setPasscodeError(''); });
     ws.on('PASSCODE_REJECTED', () => setPasscodeError('Incorrect passcode'));
     ws.on('PASSCODE_ACCEPTED', () => { setShowPasscodeModal(false); setPasscodeError(''); });
 
-    // Connect the underlying WebSocket
     ws.connect(userName, userAvatar);
     setConnectionStatus('connected');
   }, [roomId, currentUserId, getToken, kicked, router, userName, userAvatar, triggerFloatingEmoji]);
@@ -279,34 +201,14 @@ export default function RoomClient() {
     };
   }, [connectWebSocket]);
 
-  const handleTrackChange = (trackId: string | null) => {
-    setActiveTrackId(trackId);
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: 'SUBTITLE_TRACK_CHANGED',
-        payload: { trackId }
-      }));
-    }
-  };
 
-  const emitSync = (action: 'play' | 'pause' | 'seek', newProgress?: number) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: action,
-        payload: {
-          progress: newProgress !== undefined ? newProgress : progress
-        }
-      }));
-  const emitSync = useCallback((action: 'play' | 'pause' | 'seek', newProgress?: number) => {
-    if (wsRef.current) {
-      wsRef.current.send(action, { progress: newProgress !== undefined ? newProgress : progress });
-    }
-  }, [progress]);
+
+  // Video Controls
 
   const handlePlayPause = useCallback(() => {
-    const newIsPlaying = !isPlaying;
-    setIsPlaying(newIsPlaying);
-    emitSync(newIsPlaying ? 'play' : 'pause');
+    const nextState = !isPlaying;
+    setIsPlaying(nextState);
+    emitSync(nextState ? 'play' : 'pause');
   }, [isPlaying, emitSync]);
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -317,6 +219,14 @@ export default function RoomClient() {
     emitSync('seek', newProgress);
   };
 
+  const handleTrackChange = (trackId: string | null) => {
+    setActiveTrackId(trackId);
+    if (wsRef.current) {
+      wsRef.current.send('SUBTITLE_TRACK_CHANGED', { trackId });
+    }
+  };
+
+  // Chat & Moderation
   const handleChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || mutedUsers.includes(currentUserId)) return;
@@ -340,15 +250,7 @@ export default function RoomClient() {
     }
   };
 
-  const handleTrackChange = (trackId: string | null) => {
-    setActiveTrackId(trackId);
-    if (wsRef.current) {
-      wsRef.current.send('SUBTITLE_TRACK_CHANGED', { track_id: trackId });
-    }
-  };
-
-  const isHost = currentUserId === hostId;
-
+  // Fullscreen
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
       roomVideoAreaRef.current?.requestFullscreen().catch(err => console.error(`Fullscreen error: ${err.message}`));
@@ -364,11 +266,10 @@ export default function RoomClient() {
   }, []);
 
   const handleVoiceStatusChange = useCallback((peerId: string, status: VoiceStatus) => {
-    setVoiceStates(prev => {
-      if (prev[peerId] === status) return prev;
-      return { ...prev, [peerId]: status };
-    });
+    setVoiceStates(prev => (prev[peerId] === status ? prev : { ...prev, [peerId]: status }));
   }, []);
+
+  const isHost = currentUserId === hostId;
 
   if (kicked) {
     return (
@@ -383,7 +284,7 @@ export default function RoomClient() {
   }
 
   return (
-    <main className="relative flex h-screen flex-col bg-black" ref={roomVideoAreaRef}>
+    <main className="relative flex h-screen overflow-hidden bg-black" ref={roomVideoAreaRef}>
       {/* Floating Animated Reaction Container */}
       <div className="pointer-events-none absolute bottom-24 right-80 z-50 flex flex-col gap-2">
         {reactions.map((r) => (
@@ -391,7 +292,7 @@ export default function RoomClient() {
             key={r.id}
             initial={{ opacity: 1, y: 0, scale: 0.8 }}
             animate={{ opacity: 0, y: -100, scale: 1.5 }}
-            transition={{ duration: 1.8, ease: "easeOut" }}
+            transition={{ duration: 1.8, ease: 'easeOut' }}
             className="block text-center text-4xl"
           >
             {r.emoji}
@@ -403,7 +304,9 @@ export default function RoomClient() {
       <AnimatePresence>
         {showPasscodeModal && (
           <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
           >
             <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-8">
@@ -422,10 +325,17 @@ export default function RoomClient() {
                 />
                 {passcodeError && <div className="mb-4 text-sm text-red-400">{passcodeError}</div>}
                 <div className="flex gap-3">
-                  <button type="button" onClick={() => router.push('/')} className="flex-1 rounded-xl border border-white/20 bg-transparent px-4 py-3 text-white transition-colors hover:bg-white/5">
+                  <button
+                    type="button"
+                    onClick={() => router.push('/')}
+                    className="flex-1 rounded-xl border border-white/20 bg-transparent px-4 py-3 text-white transition-colors hover:bg-white/5"
+                  >
                     Cancel
                   </button>
-                  <button type="submit" className="flex-1 rounded-xl bg-violet-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-violet-500">
+                  <button
+                    type="submit"
+                    className="flex-1 rounded-xl bg-violet-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-violet-500"
+                  >
                     Join Room
                   </button>
                 </div>
@@ -435,120 +345,80 @@ export default function RoomClient() {
         )}
       </AnimatePresence>
 
-      {/* Video Area */}
-      <div className="room-video-area" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        
-        {/* Connection Status Indicator */}
-        <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 50, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: 20 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: connectionStatus === 'connected' ? '#10b981' : connectionStatus === 'connecting' ? '#f59e0b' : '#ef4444' }} />
-          <span style={{ fontSize: 12, color: 'white', textTransform: 'capitalize' }}>{connectionStatus}</span>
-        </div>
-        
-        {isHost && (
-            <div style={{ position: 'absolute', top: 20, left: 140, zIndex: 50 }}>
-                <button onClick={toggleLock} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: 20, color: 'white', border: 'none', cursor: 'pointer' }}>
-                    {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
-                    <span style={{ fontSize: 12 }}>{isLocked ? 'Room Locked' : 'Room Unlocked'}</span>
-                </button>
-            </div>
-        )}
+      {/* Main Video Section */}
 
-        {!showPasscodeModal && (
-          <VideoPlayer
-            isPlaying={isPlaying}
-            progress={progress}
-            onPlayPause={(playing) => { setIsPlaying(playing); emitSync(playing ? 'play' : 'pause'); }}
-            onSeek={(p) => { setProgress(p); emitSync('seek', p); }}
-            tracks={availableTracks}
-            activeTrackId={activeTrackId}
-            onTrackChange={handleTrackChange}
-          />
-        {/* Floating Voice Mesh Peer Overlay */}
-        <div style={{ position: 'absolute', top: 20, right: 340, zIndex: 50, maxWidth: '320px' }}>
-          <VoiceMeshOverlay
-            localStream={localStream}
-            peerStreams={peerStreams}
-            cameraActive={cameraActive}
-            micActive={micActive || isPttActive}
-            onToggleCamera={toggleCamera}
-            onToggleMic={toggleMic}
-            onSelectDevice={handleSelectDevice}
-            onVoiceStatusChange={handleVoiceStatusChange}
-            shortcutKey={shortcutKey}
-            onChangeShortcut={changeShortcut}
-
-          />
-        </div>
-
-
-        <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: '#111827', color: 'var(--text-secondary)' }}>
-          No licensed playback source is configured for this room.
-        </div>
-        
-        {/* Play/Pause Overlay animation */}
-        {!isPlaying && !showPasscodeModal && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)' }}>
-            <motion.button 
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={handlePlayPause}
-              aria-label="Play video"
-              style={{ background: 'var(--accent-primary)', border: 'none', width: '80px', height: '80px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 0 30px rgba(229,9,20,0.5)' }}
-            >
-              <Play size={40} fill="white" color="white" style={{ marginLeft: '6px' }} />
-            </motion.button>
-          </div>
-        )}
-      </div>
       <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-black">
+        {/* Status Indicators */}
         {!isFullscreen && (
-          <div className="absolute left-5 top-5 z-50 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
-            <div className={`h-2 w-2 rounded-full ${connectionStatus === 'connected' ? 'bg-emerald-500' : connectionStatus === 'connecting' ? 'bg-amber-500' : 'bg-red-500'}`} />
+          <div className="absolute left-5 top-5 z-50 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 backdrop-blur-md">
+            <div
+              className={`h-2 w-2 rounded-full ${
+                connectionStatus === 'connected'
+                  ? 'bg-emerald-500'
+                  : connectionStatus === 'connecting'
+                  ? 'bg-amber-500'
+                  : 'bg-red-500'
+              }`}
+            />
             <span className="text-xs capitalize text-white">{connectionStatus}</span>
           </div>
         )}
 
         {isHost && !isFullscreen && (
-          <div className="absolute left-32 top-5 z-50">
-            <button onClick={toggleLock} className="flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white transition-colors hover:bg-black/70">
+          <div className="absolute left-36 top-5 z-50">
+            <button
+              onClick={toggleLock}
+              className="flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white backdrop-blur-md transition-colors hover:bg-black/70"
+            >
               {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
               {isLocked ? 'Room Locked' : 'Room Unlocked'}
             </button>
           </div>
         )}
 
+        {/* Video Canvas & Controls */}
         {!showPasscodeModal && (
           <>
             <VideoPlayer
               isPlaying={isPlaying}
               progress={progress}
-              onPlayPause={(playing: boolean) => { setIsPlaying(playing); emitSync(playing ? 'play' : 'pause'); }}
-              onSeek={(p: number) => { setProgress(p); emitSync('seek', p); }}
-              tracks={availableTracks}
+              onPlayPause={(playing: boolean) => {
+                setIsPlaying(playing);
+                emitSync(playing ? 'play' : 'pause');
+              }}
+              onSeek={(p: number) => {
+                setProgress(p);
+                emitSync('seek', p);
+              }}
+              tracks={AVAILABLE_TRACKS}
               activeTrackId={activeTrackId}
               onTrackChange={handleTrackChange}
             />
 
-            <div className="absolute right-80 top-5 z-50 max-w-xs">
+            {/* Voice Mesh Overlay */}
+            <div className="absolute right-5 top-5 z-50 max-w-xs">
               <VoiceMeshOverlay
                 localStream={localStream}
                 peerStreams={peerStreams}
                 cameraActive={cameraActive}
                 micActive={micActive || isPttActive}
-                onToggleCamera={() => setCameraActive(!cameraActive)}
-                onToggleMic={() => setMicActive(!micActive)}
-                onSelectDevice={async () => { }}
+                onToggleCamera={() => setCameraActive(prev => !prev)}
+                onToggleMic={() => setMicActive(prev => !prev)}
+                onSelectDevice={async () => {}}
                 onVoiceStatusChange={handleVoiceStatusChange}
                 shortcutKey={shortcutKey}
                 onChangeShortcut={changeShortcut}
               />
             </div>
 
-            {!isPlaying && !showPasscodeModal && (
+            {/* Big Center Play Button Overlay */}
+            {!isPlaying && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/40">
                 <motion.button
-                  whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                  onClick={handlePlayPause} aria-label="Play video"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={handlePlayPause}
+                  aria-label="Play video"
                   className="flex h-20 w-20 items-center justify-center rounded-full bg-violet-600 shadow-[0_0_30px_rgba(124,58,237,0.5)] transition-colors hover:bg-violet-500"
                 >
                   <Play size={40} fill="white" className="ml-1 text-white" />
@@ -570,23 +440,30 @@ export default function RoomClient() {
               setChatVisible={setChatVisible}
             />
 
-            {/* Video Controls Bottom Bar */}
-            <div className="glass-panel absolute bottom-5 left-5 right-5 z-50 flex items-center gap-5 rounded-xl border border-white/10 bg-black/60 px-5 py-4 transition-all duration-300" style={{ right: isFullscreen ? '1.25rem' : '21rem' }}>
+            {/* Bottom Controls Bar */}
+            <div
+              className="glass-panel absolute bottom-5 left-5 z-50 flex items-center gap-5 rounded-xl border border-white/10 bg-black/60 px-5 py-4 backdrop-blur-md transition-all duration-300"
+              style={{ right: isFullscreen || !isChatVisible ? '1.25rem' : '21rem' }}
+            >
               <button onClick={handlePlayPause} aria-label={isPlaying ? 'Pause' : 'Play'} className="text-white hover:text-violet-400">
                 {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
               </button>
-              <div onClick={handleSeek} className="flex-1 h-1.5 cursor-pointer rounded-full bg-white/20">
+              <div onClick={handleSeek} className="h-1.5 flex-1 cursor-pointer rounded-full bg-white/20">
                 <div style={{ width: `${progress}%` }} className="h-full rounded-full bg-violet-600 transition-all duration-100" />
               </div>
               <span className="font-mono text-sm text-slate-300">00:00 / 02:45:00</span>
-              <button aria-label="Volume" className="text-white hover:text-violet-400"><Volume2 size={20} /></button>
-              <button onClick={toggleFullscreen} aria-label="Fullscreen" className="text-white hover:text-violet-400"><Maximize size={20} /></button>
+              <button aria-label="Volume" className="text-white hover:text-violet-400">
+                <Volume2 size={20} />
+              </button>
+              <button onClick={toggleFullscreen} aria-label="Fullscreen" className="text-white hover:text-violet-400">
+                <Maximize size={20} />
+              </button>
             </div>
           </>
         )}
       </div>
 
-      {/* Chat Sidebar Component */}
+      {/* Chat Sidebar */}
       <AnimatePresence>
         {isChatVisible && !showPasscodeModal && (
           <ChatSidebar
@@ -604,7 +481,7 @@ export default function RoomClient() {
         )}
       </AnimatePresence>
 
-      {/* Toggle Chat Button (when hidden) */}
+      {/* Toggle Chat Floating Button (When Hidden) */}
       {!isChatVisible && !showPasscodeModal && (
         <button
           onClick={() => setChatVisible(true)}

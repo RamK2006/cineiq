@@ -1,17 +1,19 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { SubtitleTrackData, SubtitlePreferences } from '../types/media';
+'use client';
+
+import React, { useRef, useEffect, useState } from 'react';
+import { SubtitleTrackData, SubtitlePreferences, SubtitleFontSize, SubtitleBackgroundOpacity } from '../types/media';
 import { fetchAndProcessSubtitle } from '../utils/subtitles';
 import { Settings, Subtitles, Check } from 'lucide-react';
-import { motion } from 'framer-motion';
 
 export interface VideoPlayerProps {
   isPlaying: boolean;
   progress: number; // 0 to 100
   onPlayPause?: (playing: boolean) => void;
   onSeek?: (progress: number) => void;
-  tracks: SubtitleTrackData[];
-  activeTrackId: string | null;
+  tracks?: SubtitleTrackData[];
+  activeTrackId?: string | null;
   onTrackChange?: (trackId: string | null) => void;
+  videoUrl?: string;
 }
 
 const DEFAULT_PREFS: SubtitlePreferences = {
@@ -24,9 +26,10 @@ export default function VideoPlayer({
   progress,
   onPlayPause,
   onSeek,
-  tracks,
-  activeTrackId,
-  onTrackChange
+  tracks = [],
+  activeTrackId = null,
+  onTrackChange,
+  videoUrl
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -54,9 +57,6 @@ export default function VideoPlayer({
   }, [isPlaying]);
 
   // Sync progress to actual video element ONLY when it differs significantly
-  // (We don't want to constantly overwrite video.currentTime while it's playing naturally)
-  // We'll let the external progress drive seek if it's a jump, but ideally we should only set it on remote seek.
-  // We will assume `progress` comes from external seek if it differs by more than 1%.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !video.duration) return;
@@ -76,7 +76,8 @@ export default function VideoPlayer({
       const loaded: (SubtitleTrackData & { objectUrl: string })[] = [];
       for (const t of tracks) {
         try {
-          const objectUrl = await fetchAndProcessSubtitle(t.src, t.format);
+          const objectUrl = await fetchAndProcessSubtitle(t.src, t.format || 'srt');
+
           objectUrlsToRevoke.push(objectUrl);
           loaded.push({ ...t, objectUrl });
         } catch (e) {
@@ -104,8 +105,6 @@ export default function VideoPlayer({
     const textTracks = video.textTracks;
     for (let i = 0; i < textTracks.length; i++) {
       const tt = textTracks[i];
-      // We map our track ID to the track label or language to identify it.
-      // Easiest is to match language.
       const match = processedTracks.find(pt => pt.id === activeTrackId);
       if (match && tt.language === match.language) {
         tt.mode = 'showing';
@@ -114,12 +113,6 @@ export default function VideoPlayer({
       }
     }
   }, [activeTrackId, processedTracks]);
-
-  // Handle native video events to report progress back
-  const handleTimeUpdate = () => {
-    // If we wanted to report local natural progress we could, but typically 
-    // the syncing logic sends periodic updates. We'll leave this to the parent or just let natural playback happen.
-  };
 
   const getSubtitleCSS = () => {
     const sizes = { small: '75%', medium: '100%', large: '150%' };
@@ -135,22 +128,18 @@ export default function VideoPlayer({
     `;
   };
 
+  const srcToUse = videoUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'black' }}>
       <style>{getSubtitleCSS()}</style>
       
-      {/* 
-        To actually test subtitles, we need a valid video source. 
-        Using a placeholder blank video or standard open source video if none provided.
-        In a real app, `src` would be passed as a prop.
-      */}
       <video
         ref={videoRef}
         className="cineiq-video-player"
-        src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+        src={srcToUse}
         style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         crossOrigin="anonymous"
-        onTimeUpdate={handleTimeUpdate}
         onClick={() => onPlayPause && onPlayPause(!isPlaying)}
       >
         {processedTracks.map(t => (
@@ -165,6 +154,49 @@ export default function VideoPlayer({
         ))}
       </video>
 
+      {/* Controls Bar */}
+      <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between rounded-xl bg-black/60 p-4 backdrop-blur-md z-40">
+        <button
+          onClick={() => onPlayPause?.(!isPlaying)}
+          className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500"
+        >
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
+
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={progress}
+          onChange={(e) => onSeek?.(Number(e.target.value))}
+          className="mx-4 flex-1 accent-violet-500"
+        />
+
+        <div className="flex items-center gap-2">
+          {tracks.length > 0 && (
+            <button
+              ref={subtitlesButtonRef}
+              onClick={() => { setShowSubtitlesMenu(!showSubtitlesMenu); setShowSettings(false); }}
+              style={{ background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white', padding: '8px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              aria-label="Subtitles Menu"
+              aria-expanded={showSubtitlesMenu}
+            >
+              <Subtitles size={20} color={activeTrackId ? 'var(--accent-primary)' : 'white'} />
+            </button>
+          )}
+
+          <button
+            ref={settingsButtonRef}
+            onClick={() => { setShowSettings(!showSettings); setShowSubtitlesMenu(false); }}
+            style={{ background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white', padding: '8px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            aria-label="Subtitle Settings"
+            aria-expanded={showSettings}
+          >
+            <Settings size={20} />
+          </button>
+        </div>
+      </div>
+
       {/* Menus overlay */}
       {showSubtitlesMenu && (
         <div style={{ position: 'absolute', bottom: '80px', right: '80px', background: 'rgba(17, 24, 39, 0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '8px', zIndex: 60, minWidth: '180px' }}>
@@ -172,7 +204,7 @@ export default function VideoPlayer({
           <button
             onClick={() => { onTrackChange?.(null); setShowSubtitlesMenu(false); }}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '14px', borderRadius: '6px', marginTop: '4px' }}
-            className="hover-bg-glass"
+            className="hover:bg-white/10"
             aria-label="Turn off subtitles"
           >
             <span>Off</span>
@@ -183,7 +215,7 @@ export default function VideoPlayer({
               key={t.id}
               onClick={() => { onTrackChange?.(t.id); setShowSubtitlesMenu(false); }}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '14px', borderRadius: '6px' }}
-              className="hover-bg-glass"
+              className="hover:bg-white/10"
               aria-label={`Select ${t.label} subtitles`}
             >
               <span>{t.label}</span>
@@ -231,36 +263,9 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Invisible backdrop to close menus */}
       {(showSettings || showSubtitlesMenu) && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 50 }} onClick={() => { setShowSettings(false); setShowSubtitlesMenu(false); }} />
       )}
-      
-      {/* Overlay buttons to trigger menus - can be positioned in parent or here. Let's put them on the right side of the bottom bar area */}
-      <div style={{ position: 'absolute', bottom: '20px', right: '350px', zIndex: 51, display: 'flex', gap: '12px' }}>
-        <button
-          ref={subtitlesButtonRef}
-          onClick={() => { setShowSubtitlesMenu(!showSubtitlesMenu); setShowSettings(false); }}
-          style={{ background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white', padding: '8px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          aria-label="Subtitles Menu"
-          aria-expanded={showSubtitlesMenu}
-        >
-          <Subtitles size={20} color={activeTrackId ? 'var(--accent-primary)' : 'white'} />
-        </button>
-        <button
-          ref={settingsButtonRef}
-          onClick={() => { setShowSettings(!showSettings); setShowSubtitlesMenu(false); }}
-          style={{ background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white', padding: '8px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          aria-label="Subtitle Settings"
-          aria-expanded={showSettings}
-        >
-          <Settings size={20} />
-        </button>
-      </div>
-      
-      <style jsx>{`
-        .hover-bg-glass:hover { background: rgba(255,255,255,0.1) !important; }
-      `}</style>
     </div>
   );
 }

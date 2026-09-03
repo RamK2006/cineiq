@@ -1,7 +1,7 @@
 import asyncio
 import os
 import structlog
-from typing import List, Dict, Any
+from typing import List
 from sqlalchemy.future import select
 
 from app.db.session import AsyncSessionLocal
