@@ -1,66 +1,65 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, Send, X, Bot, Film } from 'lucide-react';
+import { Send, X, Bot, Film } from 'lucide-react';
 import Image from 'next/image';
-import { fetchCineBotResponse, CineBotMessage } from '@/lib/cinebot';
+import { CineBotMessage } from '@/lib/cinebot';
 
 interface CineBotDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  messages?: CineBotMessage[];
+  input?: string;
+  isLoading?: boolean;
+  onInputChange?: (value: string) => void;
+  onSendMessage?: (e: React.FormEvent) => void;
 }
 
-/**
- * CineBotDrawer Component
- * An animated, slide-over chat interface for the AI movie assistant.
- * Features message streaming simulation, typing indicators, and interactive movie cards.
- */
-export default function CineBotDrawer({ isOpen, onClose }: CineBotDrawerProps) {
-  const [messages, setMessages] = useState<CineBotMessage[]>([
-    {
-      role: 'assistant',
-      content: "Hi! I'm CineBot 🎬. Tell me what kind of movie you're in the mood for, or ask for recommendations similar to your favorites!",
-    },
-  ]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+export default function CineBotDrawer({
+  isOpen,
+  onClose,
+  messages: propMessages,
+  input: propInput,
+  isLoading: propIsLoading,
+  onInputChange: propOnInputChange,
+  onSendMessage: propOnSendMessage,
+}: CineBotDrawerProps) {
+  const [internalMessages, setInternalMessages] = useState<CineBotMessage[]>([]);
+  const [internalInput, setInternalInput] = useState('');
+  const [internalLoading, setInternalLoading] = useState(false);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const handleSend = async (e: React.FormEvent) => {
+  const messages = propMessages ?? internalMessages;
+  const input = propInput ?? internalInput;
+  const isLoading = propIsLoading ?? internalLoading;
+  const onInputChange = propOnInputChange ?? setInternalInput;
+  const onSendMessage = propOnSendMessage ?? (async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
-
-    const userMessage: CineBotMessage = { role: 'user', content: input.trim() };
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
-
+    const userMsg = { role: 'user', content: input.trim() };
+    setInternalMessages(prev => [...prev, userMsg as CineBotMessage]);
+    setInternalInput('');
+    setInternalLoading(true);
     try {
-      const history = messages.map(({ role, content }) => ({ role, content }));
-      const response = await fetchCineBotResponse(userMessage.content, history);
-      setMessages((prev) => [...prev, response]);
-    } catch (error) {
-      console.error('CineBot error:', error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: "Oops! I'm having trouble connecting to the movie database. Please try again.",
-        },
-      ]);
+      const res = await fetch('/api/v1/search/cinebot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: userMsg.content, history: internalMessages }),
+      });
+      const data = await res.json();
+      setInternalMessages(prev => [...prev, { role: 'assistant', content: data.conversational_reply, recommendations: data.recommendations }]);
+    } catch {
+      setInternalMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I couldn't process your request." }]);
     } finally {
-      setIsLoading(false);
+      setInternalLoading(false);
     }
-  };
+  });
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
   return (
     <AnimatePresence>
@@ -70,7 +69,7 @@ export default function CineBotDrawer({ isOpen, onClose }: CineBotDrawerProps) {
           animate={{ x: 0 }}
           exit={{ x: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-          className="fixed right-0 top-0 z-50 h-full w-full max-w-md border-l border-white/10 bg-slate-900/95 shadow-2xl backdrop-blur-xl dark:bg-slate-900/95"
+          className="fixed right-0 top-0 z-50 h-full w-full max-w-md border-l border-white/10 bg-slate-900/95 shadow-2xl backdrop-blur-xl dark:bg-slate-900/95 flex flex-col"
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/10 p-4">
@@ -90,7 +89,7 @@ export default function CineBotDrawer({ isOpen, onClose }: CineBotDrawerProps) {
           </div>
 
           {/* Messages Area */}
-          <div className="flex h-[calc(100vh-140px)] flex-col overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
             {messages.map((msg, idx) => (
               <motion.div
                 key={idx}
@@ -144,11 +143,7 @@ export default function CineBotDrawer({ isOpen, onClose }: CineBotDrawerProps) {
 
             {/* Typing Indicator */}
             {isLoading && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-start gap-2"
-              >
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-start gap-2">
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-600/20 text-violet-400">
                   <Bot size={16} />
                 </div>
@@ -165,12 +160,12 @@ export default function CineBotDrawer({ isOpen, onClose }: CineBotDrawerProps) {
           </div>
 
           {/* Input Area */}
-          <form onSubmit={handleSend} className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-slate-900/95 p-4 backdrop-blur-xl">
+          <form onSubmit={onSendMessage} className="border-t border-white/10 bg-slate-900/95 p-4 backdrop-blur-xl">
             <div className="relative flex items-center gap-2">
               <input
                 type="text"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => onInputChange(e.target.value)}
                 placeholder="Ask for a movie recommendation..."
                 className="flex-1 rounded-xl border border-white/10 bg-slate-800/50 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
                 disabled={isLoading}

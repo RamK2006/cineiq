@@ -32,7 +32,13 @@ export type WSMessageType =
     | 'USER_MUTED'
     | 'USER_UNMUTED'
     | 'ROOM_LOCKED'
-    | 'ROOM_UNLOCKED';
+    | 'ROOM_UNLOCKED'
+    | 'LOCK_ROOM'
+    | 'UNLOCK_ROOM'
+    | 'submit_passcode'
+    | 'SUBMIT_PASSCODE'
+    | 'SUBTITLE_TRACK_CHANGED';
+
 
 export interface WSMessage {
     type: WSMessageType;

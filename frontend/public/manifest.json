@@ -1,7 +1,7 @@
 {
-  "name": "CINEIQ - Discover Movies Together",
-  "short_name": "CINEIQ",
-  "description": "AI-powered movie recommendations and social discovery platform.",
+  "name": "CineIQ - AI Movie Discovery & Social Watchlists",
+  "short_name": "CineIQ",
+  "description": "Explore personalized AI movie recommendations, browse curated cinematic collections, and connect with fellow film enthusiasts.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",
@@ -19,6 +19,19 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "categories": ["entertainment", "movies", "social"],
+  "shortcuts": [
+    {
+      "name": "Browse Movies",
+      "url": "/browse",
+      "description": "Explore the latest movie catalog"
+    },
+    {
+      "name": "CineBot Assistant",
+      "url": "/chat",
+      "description": "Get AI-powered movie recommendations"
     }
   ]
 }

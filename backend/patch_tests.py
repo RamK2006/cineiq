@@ -1,4 +1,3 @@
-import re
 
 with open('tests/test_vector_search.py', 'r') as f:
     content = f.read()

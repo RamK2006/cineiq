@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from app.main import app
@@ -26,3 +27,15 @@ def test_health_check_healthy_when_services_configured():
         response = client.get("/health")
         assert response.status_code in (200, 503)
         assert "checks" in response.json()
+
+
+@pytest.mark.asyncio
+async def test_health_async(async_client):
+    """Test health endpoint asynchronously with async_client fixture."""
+    response = await async_client.get("/health")
+    assert response.status_code in (200, 503)
+    data = response.json()
+    assert "status" in data
+    assert "checks" in data
+
+
