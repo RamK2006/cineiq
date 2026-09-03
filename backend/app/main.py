@@ -291,7 +291,16 @@ except Exception:
 
 # Include Routers & WebSockets
 app.include_router(api_router, prefix="/api/v1")
-app.websocket("/ws/room/{room_id}/{user_id}")(room_websocket_signaling_endpoint)
+
+
+# Wrapped WebSocket endpoint with active client connection gauge instrumentation
+@app.websocket("/ws/room/{room_id}/{user_id}")
+async def instrumented_websocket_endpoint(websocket, room_id: str, user_id: str):
+    websocket_connected_clients.inc()
+    try:
+        await room_websocket_signaling_endpoint(websocket, room_id, user_id)
+    finally:
+        websocket_connected_clients.dec()
 
 
 # Database query event instrumentation

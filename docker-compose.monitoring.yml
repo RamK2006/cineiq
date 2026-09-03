@@ -47,4 +47,4 @@ volumes:
 networks:
   cineiq-network:
     external: true
-    name: cineiq_cineiq-network # Adjust to match your main docker-compose network name if different
+    name: cineiq_cineiq-network
