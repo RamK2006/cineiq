@@ -1,4 +1,4 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
 /**
  * Home Page End-to-End Test Suite
@@ -6,6 +6,7 @@ import { test, expect, Page } from '@playwright/test';
  * - Hero movie rendering and interactions
  * - Trending rows visibility and navigation
  * - Global navigation link functionality
+ * - Mobile responsive adjustments
  */
 test.describe('Home Page E2E Tests', () => {
   test.beforeEach(async ({ page }) => {
@@ -24,8 +25,7 @@ test.describe('Home Page E2E Tests', () => {
     const heroTitle = heroSection.locator('h1, h2');
     await expect(heroTitle).toBeVisible();
     const titleText = await heroTitle.textContent();
-    expect(titleText).toBeTruthy();
-    expect(titleText?.length).toBeGreaterThan(0);
+    expect(titleText?.trim().length).toBeGreaterThan(0);
 
     // Verify overview/description text exists
     const heroOverview = heroSection.locator('p');
@@ -39,7 +39,7 @@ test.describe('Home Page E2E Tests', () => {
     await expect(moreInfoButton).toBeVisible();
   });
 
-  test('should render trending movie rows and allow horizontal scrolling', async ({ page }) => {
+  test('should render trending movie rows and allow navigation to detail page', async ({ page }) => {
     // Verify trending section exists
     const trendingSection = page.locator('section[data-testid="trending-movies"], section:has-text("Trending")');
     await expect(trendingSection).toBeVisible({ timeout: 10000 });
@@ -55,7 +55,7 @@ test.describe('Home Page E2E Tests', () => {
     if (movieHref) {
       await firstMovieCard.click();
       // Verify navigation to movie detail page
-      await expect(page).toHaveURL(new RegExp(`^/movie/`));
+      await expect(page).toHaveURL(/^\/movie\//);
       await page.goBack();
       await page.waitForLoadState('networkidle');
     }
@@ -84,7 +84,7 @@ test.describe('Home Page E2E Tests', () => {
     // Locate the profile navigation link
     const profileLink = page.locator('a[href="/profile"], nav a:has-text("Profile")');
 
-    // If profile link is visible, click it
+    // If profile link is present in DOM and visible, click it
     if (await profileLink.isVisible()) {
       await profileLink.click();
       // Verify navigation to profile page
