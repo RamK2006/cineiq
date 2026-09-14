@@ -13,6 +13,18 @@ import CineBotDrawer from './CineBotDrawer'; // --- NEW: Import CineBotDrawer --
 type Result = { id: string; title: string; overview: string; poster_path?: string | null; similarity_score: number };
 type Suggestion = { id: string; title: string; poster_path?: string | null; year?: number | null };
 
+const SEARCH_HISTORY_KEY = 'cineiq-search-history';
+const MAX_SEARCH_HISTORY = 10;
+
+const TRENDING_SEARCHES = [
+  'Oscar Winners',
+  'Mind-bending Sci-Fi',
+  '90s Nostalgia',
+  'Space Adventure',
+  'Anime Classics',
+  'Psychological Thrillers',
+];
+
 const AVAILABLE_GENRES = [
   'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary',
   'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Music', 'Mystery',
@@ -25,6 +37,26 @@ function SearchContent() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Result[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
+
+  useEffect(() => {
+    try {
+      const storedHistory = localStorage.getItem(SEARCH_HISTORY_KEY);
+      if (!storedHistory) return;
+      const parsedHistory = JSON.parse(storedHistory);
+      if (Array.isArray(parsedHistory)) {
+        setSearchHistory(
+          parsedHistory
+            .filter((item): item is string => typeof item === 'string')
+            .slice(0, MAX_SEARCH_HISTORY)
+        );
+      }
+    } catch {
+      // Ignore malformed localStorage data
+    }
+  }, []);
 
   // Suggestions state
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -85,6 +117,7 @@ function SearchContent() {
     function handleClickOutside(event: MouseEvent) {
       if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
         setShowSuggestions(false);
+        setShowSearchPanel(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -119,6 +152,13 @@ function SearchContent() {
   };
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') {
+      setShowSuggestions(false);
+      setShowSearchPanel(false);
+      setHighlightedIndex(-1);
+      return;
+    }
+
     if (!showSuggestions || suggestions.length === 0) {
       if (e.key === 'ArrowDown' && suggestions.length > 0) {
         setShowSuggestions(true);
@@ -140,9 +180,6 @@ function SearchContent() {
       } else {
         setShowSuggestions(false);
       }
-    } else if (e.key === 'Escape') {
-      setShowSuggestions(false);
-      setHighlightedIndex(-1);
     }
   }
 
@@ -188,10 +225,71 @@ function SearchContent() {
     setIsSearching(false);
   }
 
+  function saveSearchToHistory(searchQuery: string) {
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) return;
+
+    setSearchHistory((prev) => {
+      const updatedHistory = [
+        trimmedQuery,
+        ...prev.filter((item) => item.toLowerCase() !== trimmedQuery.toLowerCase()),
+      ].slice(0, MAX_SEARCH_HISTORY);
+
+      try {
+        localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(updatedHistory));
+      } catch {
+        // Ignore localStorage error
+      }
+      return updatedHistory;
+    });
+  }
+
+  function removeSearchFromHistory(searchQuery: string) {
+    setSearchHistory((prev) => {
+      const updatedHistory = prev.filter((item) => item !== searchQuery);
+      try {
+        localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(updatedHistory));
+      } catch {
+        // Ignore
+      }
+      return updatedHistory;
+    });
+  }
+
+  function clearSearchHistory() {
+    setSearchHistory([]);
+    try {
+      localStorage.removeItem(SEARCH_HISTORY_KEY);
+    } catch {
+      // Ignore
+    }
+  }
+
+  function runQuickSearch(searchQuery: string) {
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) return;
+
+    setQuery(trimmedQuery);
+    saveSearchToHistory(trimmedQuery);
+    setShowSearchPanel(false);
+    setShowSuggestions(false);
+
+    const params = new URLSearchParams();
+    params.append('q', trimmedQuery);
+
+    router.push(`/search?${params.toString()}`);
+  }
+
   function handleSearch(event: React.FormEvent) {
     event.preventDefault();
     setShowSuggestions(false);
+    setShowSearchPanel(false);
+    
     if (!query.trim() && selectedGenres.length === 0 && !yearFrom && !yearTo && minRating === 0) return;
+    
+    if (query.trim()) {
+      saveSearchToHistory(query);
+    }
 
     const params = new URLSearchParams();
     if (query.trim()) params.append('q', query.trim());
@@ -220,9 +318,23 @@ function SearchContent() {
               <Search aria-hidden size={24} style={{ alignSelf: 'center', marginLeft: 8 }} />
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setQuery(value);
+                  if (value.trim()) {
+                    setShowSearchPanel(false);
+                  } else {
+                    setShowSuggestions(false);
+                    setShowSearchPanel(true);
+                  }
+                }}
                 onFocus={() => {
-                  if (query.trim() && suggestions.length > 0) setShowSuggestions(true);
+                  if (query.trim() && suggestions.length > 0) {
+                    setShowSuggestions(true);
+                    setShowSearchPanel(false);
+                  } else if (!query.trim()) {
+                    setShowSearchPanel(true);
+                  }
                 }}
                 onKeyDown={handleKeyDown}
                 role="combobox"
@@ -344,8 +456,133 @@ function SearchContent() {
                 ))}
               </div>
             )}
-          </div>
 
+            {showSearchPanel && (
+              <div
+                role="dialog"
+                aria-label="Recent and trending searches"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  marginTop: 8,
+                  padding: 20,
+                  background: 'rgba(15, 23, 42, 0.97)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: 16,
+                  boxShadow: '0 10px 30px -5px rgba(0, 0, 0, 0.5)',
+                  zIndex: 50,
+                }}
+              >
+                {searchHistory.length > 0 && (
+                  <div style={{ marginBottom: 20 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: 12,
+                      }}
+                    >
+                      <h3 style={{ margin: 0, fontSize: 15 }}>Recent Searches</h3>
+                      <button
+                        type="button"
+                        onClick={clearSearchHistory}
+                        aria-label="Clear all recent searches"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--accent-secondary)',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                        }}
+                      >
+                        Clear All
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {searchHistory.map((search) => (
+                        <div
+                          key={search}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            background: 'rgba(255, 255, 255, 0.05)',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => runQuickSearch(search)}
+                            style={{
+                              flex: 1,
+                              textAlign: 'left',
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'white',
+                              cursor: 'pointer',
+                              padding: 0,
+                              fontSize: 14,
+                            }}
+                          >
+                            {search}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => removeSearchFromHistory(search)}
+                            aria-label={`Remove ${search} from recent searches`}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--text-secondary)',
+                              cursor: 'pointer',
+                              padding: 4,
+                            }}
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <h3 style={{ margin: '0 0 12px', fontSize: 15 }}>Trending Searches</h3>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {TRENDING_SEARCHES.map((search) => (
+                      <button
+                        key={search}
+                        type="button"
+                        onClick={() => runQuickSearch(search)}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 999,
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          background: 'rgba(255, 255, 255, 0.06)',
+                          color: 'white',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          transition: 'background 0.15s ease, transform 0.15s ease',
+                        }}
+                      >
+                        {search}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           {showFilters && (
             <div className="glass-panel" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
